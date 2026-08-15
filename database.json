@@ -1,0 +1,196 @@
+{
+  "validLicenseKeys": [
+    [
+      "ADMIN-XMR-9999",
+      {
+        "expiresAt": 9999999999999,
+        "deviceIds": [
+          "dev-admin-pc"
+        ]
+      }
+    ],
+    [
+      "ADMIN-VLASSIS-2026",
+      {
+        "expiresAt": 9999999999999,
+        "deviceIds": [
+          "dev_vlassis_pc_01",
+          "dev_vlassis_phone_02"
+        ]
+      }
+    ],
+    [
+      "GC-DEMO-30DAYS",
+      {
+        "expiresAt": 1789340109241,
+        "deviceIds": [
+          "dev-mobile-android",
+          "dev-smart-tv"
+        ]
+      }
+    ],
+    [
+      "GC-GREEK-90DAYS",
+      {
+        "expiresAt": 1794524109241,
+        "deviceIds": [
+          "dev-tablet-ipad"
+        ]
+      }
+    ],
+    [
+      "GC-PREMIUM-1YEAR",
+      {
+        "expiresAt": 1818284109241,
+        "deviceIds": [
+          "dev-livingroom-tv"
+        ]
+      }
+    ],
+    [
+      "GC-VIP-2YEARS",
+      {
+        "expiresAt": 1849820109241,
+        "deviceIds": []
+      }
+    ],
+    [
+      "GC-EXPIRED-KEY",
+      {
+        "expiresAt": 1786316109241,
+        "deviceIds": [
+          "dev-old-phone"
+        ]
+      }
+    ],
+    [
+      "USER-DEMO-2026",
+      {
+        "expiresAt": 1789343028241,
+        "deviceIds": [
+          "dev_windows_pc_01",
+          "dev_android_phone_02"
+        ]
+      }
+    ]
+  ],
+  "userAccounts": [
+    [
+      "admingctoons",
+      {
+        "username": "admingctoons",
+        "passwordHash": "g6975767770",
+        "licenseKey": "ADMIN-XMR-9999",
+        "status": "active",
+        "createdAt": 1786751028240,
+        "expiresAt": 9999999999999
+      }
+    ],
+    [
+      "admin",
+      {
+        "username": "admin",
+        "passwordHash": "admin",
+        "licenseKey": "ADMIN-XMR-9999",
+        "status": "active",
+        "createdAt": 1786751028240,
+        "expiresAt": 9999999999999
+      }
+    ],
+    [
+      "adminvlassis",
+      {
+        "username": "adminvlassis",
+        "passwordHash": "adminVlassis132",
+        "licenseKey": "ADMIN-VLASSIS-2026",
+        "status": "active",
+        "createdAt": 1786751028240,
+        "expiresAt": 9999999999999
+      }
+    ],
+    [
+      "user",
+      {
+        "username": "user",
+        "passwordHash": "user123",
+        "licenseKey": "USER-DEMO-2026",
+        "status": "active",
+        "createdAt": 1786751028241,
+        "expiresAt": 1789343028241,
+        "renewalsCount": 1
+      }
+    ]
+  ],
+  "userDevicesMap": [
+    [
+      "adminvlassis",
+      [
+        {
+          "deviceId": "dev_vlassis_pc_01",
+          "deviceName": "Windows PC (Vlassis Admin)",
+          "ip": "192.168.1.100",
+          "lastActive": 1786750728240
+        },
+        {
+          "deviceId": "dev_vlassis_phone_02",
+          "deviceName": "iPhone / iPad (Vlassis)",
+          "ip": "192.168.1.101",
+          "lastActive": 1786749228240
+        }
+      ]
+    ],
+    [
+      "admin-vlassis-2026",
+      [
+        {
+          "deviceId": "dev_vlassis_pc_01",
+          "deviceName": "Windows PC (Vlassis Admin)",
+          "ip": "192.168.1.100",
+          "lastActive": 1786750728240
+        },
+        {
+          "deviceId": "dev_vlassis_phone_02",
+          "deviceName": "iPhone / iPad (Vlassis)",
+          "ip": "192.168.1.101",
+          "lastActive": 1786749228240
+        }
+      ]
+    ],
+    [
+      "user",
+      [
+        {
+          "deviceId": "dev_windows_pc_01",
+          "deviceName": "Windows PC (Home)",
+          "ip": "192.168.1.45",
+          "lastActive": 1786750128241
+        },
+        {
+          "deviceId": "dev_android_phone_02",
+          "deviceName": "Android Συσκευή (Mobile)",
+          "ip": "192.168.1.88",
+          "lastActive": 1786743828241
+        }
+      ]
+    ],
+    [
+      "user-demo-2026",
+      [
+        {
+          "deviceId": "dev_windows_pc_01",
+          "deviceName": "Windows PC (Home)",
+          "ip": "192.168.1.45",
+          "lastActive": 1786750128241
+        },
+        {
+          "deviceId": "dev_android_phone_02",
+          "deviceName": "Android Συσκευή (Mobile)",
+          "ip": "192.168.1.88",
+          "lastActive": 1786743828241
+        }
+      ]
+    ]
+  ],
+  "screenRecordAlertsMap": [],
+  "videos": []
+}

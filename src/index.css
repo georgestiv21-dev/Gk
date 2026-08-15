@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #f26822; /* Monero orange */
+  --color-primary-dark: #d55a1d;
+  --color-dark: #0f1115;
+  --color-darker: #090a0c;
+  --color-panel: #1a1d24;
+}
+
+body {
+  background-color: var(--color-darker);
+  color: white;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
