@@ -41,7 +41,10 @@ export default function Dashboard() {
 
   const navigate = useNavigate();
 
-  const isAdmin = localStorage.getItem("isAdmin") === "true";
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [isReadOnlyAdmin, setIsReadOnlyAdmin] = useState<boolean>(false);
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
+
   const licenseKey = localStorage.getItem("licenseKey") || "";
   const username = localStorage.getItem("username") || "";
 
@@ -98,8 +101,12 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (!licenseKey && !username) {
-      navigate("/login");
+    const currentKey = localStorage.getItem("licenseKey") || "";
+    const currentUser = localStorage.getItem("username") || "";
+
+    if (!currentKey && !currentUser) {
+      localStorage.clear();
+      navigate("/login", { replace: true });
       return;
     }
 
@@ -112,41 +119,51 @@ export default function Dashboard() {
       return devId;
     };
 
-    // Check account activation status & library access
-    axios.post("/api/user-status", { username, licenseKey, deviceId: getDeviceId() })
+    // Strict server-side session check
+    axios.post("/api/user-status", { username: currentUser, licenseKey: currentKey, deviceId: getDeviceId() })
       .then(res => {
         const isUserAdmin = Boolean(res.data.isAdmin);
-        if (res.data.libraryAccess) {
-          setUserLibraryAccess(res.data.libraryAccess);
-          localStorage.setItem("libraryAccess", res.data.libraryAccess);
-        }
+        const isReadOnly = Boolean(res.data.isReadOnlyAdmin);
+        setIsAdmin(isUserAdmin);
+        setIsReadOnlyAdmin(isReadOnly);
+
         if (isUserAdmin) {
           localStorage.setItem("isAdmin", "true");
-          localStorage.setItem("isReadOnlyAdmin", res.data.isReadOnlyAdmin ? "true" : "false");
+          localStorage.setItem("isReadOnlyAdmin", isReadOnly ? "true" : "false");
           setUserStatus("active");
         } else {
-          localStorage.setItem("isAdmin", "false");
-          localStorage.setItem("isReadOnlyAdmin", "false");
+          localStorage.removeItem("isAdmin");
+          localStorage.removeItem("isReadOnlyAdmin");
           if (res.data.status === "pending") {
             setUserStatus("pending");
           } else {
             setUserStatus("active");
           }
         }
-      })
-      .catch(() => {
-        setUserStatus("pending");
-      })
-      .finally(() => {
+
+        if (res.data.libraryAccess) {
+          setUserLibraryAccess(res.data.libraryAccess);
+          localStorage.setItem("libraryAccess", res.data.libraryAccess);
+        }
+
+        // Fetch videos after verified authentication
         axios.get("/api/videos")
-          .then(res => {
-            const sorted = res.data.sort((a: Video, b: Video) => a.title.localeCompare(b.title, 'el', { sensitivity: 'base' }));
+          .then(vRes => {
+            const sorted = vRes.data.sort((a: Video, b: Video) => a.title.localeCompare(b.title, 'el', { sensitivity: 'base' }));
             setVideos(sorted);
           })
           .catch(err => console.error(err))
           .finally(() => setLoading(false));
+      })
+      .catch((err) => {
+        console.warn("Session verification failed, redirecting to login:", err);
+        localStorage.clear();
+        navigate("/login", { replace: true });
+      })
+      .finally(() => {
+        setAuthChecking(false);
       });
-  }, [navigate, licenseKey, username]);
+  }, [navigate]);
 
   // Global Anti-Screen Capture & Recording Alert Listener
   useEffect(() => {
@@ -199,10 +216,8 @@ export default function Dashboard() {
   }, [username, licenseKey]);
 
   const handleLogout = () => {
-    localStorage.removeItem("licenseKey");
-    localStorage.removeItem("isAdmin");
-    localStorage.removeItem("libraryAccess");
-    navigate("/login");
+    localStorage.clear();
+    navigate("/login", { replace: true });
   };
 
   // Check if a specific video is allowed for the active user's permissions & category filter
@@ -973,6 +988,8 @@ interface UserAccountItem {
   daysRemaining: number;
   renewalsCount?: number;
   isAdmin: boolean;
+  isReadOnlyAdmin?: boolean;
+  roleLabel?: string;
   libraryAccess?: "gctunes" | "greek_streaming" | "both";
   screenRecordAlertsCount?: number;
   lastScreenRecordAlert?: number;
@@ -996,12 +1013,18 @@ function AdminPanel({
   const [users, setUsers] = useState<UserAccountItem[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userSearch, setUserSearch] = useState("");
+  const [showOnlyAdmins, setShowOnlyAdmins] = useState(false);
   const [approvingUser, setApprovingUser] = useState<string | null>(null);
 
   // User Approval / Access Control Modal State
   const [approvalModalUser, setApprovalModalUser] = useState<UserAccountItem | null>(null);
   const [modalDays, setModalDays] = useState<number>(30);
   const [modalLibraryAccess, setModalLibraryAccess] = useState<"gctunes" | "greek_streaming" | "both">("both");
+
+  // User Deletion State (In-UI Modal without window.confirm)
+  const [userToDelete, setUserToDelete] = useState<UserAccountItem | null>(null);
+  const [deleteNotification, setDeleteNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [deletingUser, setDeletingUser] = useState<string | null>(null);
 
   // Storj Auto-Sync State (Zero AI)
   const [syncLoading, setSyncLoading] = useState(false);
@@ -1102,6 +1125,48 @@ function AdminPanel({
     setModalLibraryAccess(user.libraryAccess || "both");
   };
 
+  const openDeleteModal = (user: UserAccountItem) => {
+    if (isReadOnly) return;
+    setUserToDelete(user);
+  };
+
+  const executeDeleteUser = async (targetUsername: string) => {
+    if (isReadOnly) return;
+    setDeletingUser(targetUsername);
+    setDeleteNotification(null);
+    try {
+      const res = await axios.post("/api/admin/users/delete", {
+        adminKey,
+        adminUsername: currentUsername,
+        username: targetUsername
+      }, {
+        headers: { 
+          "x-admin-key": adminKey,
+          "x-username": currentUsername
+        }
+      });
+      if (res.data.success) {
+        setUsers(prev => prev.filter(u => u.username !== targetUsername));
+        if (approvalModalUser?.username === targetUsername) {
+          setApprovalModalUser(null);
+        }
+        setUserToDelete(null);
+        setDeleteNotification({
+          type: "success",
+          message: `Ο λογαριασμός "${targetUsername}" διαγράφηκε επιτυχώς!`
+        });
+        setTimeout(() => setDeleteNotification(null), 4000);
+      }
+    } catch (err: any) {
+      setDeleteNotification({
+        type: "error",
+        message: err.response?.data?.error || "Σφάλμα κατά τη διαγραφή του χρήστη."
+      });
+    } finally {
+      setDeletingUser(null);
+    }
+  };
+
   const handleApproveOrUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!approvalModalUser || isReadOnly) return;
@@ -1138,11 +1203,25 @@ function AdminPanel({
     }
   };
 
-  const filteredUsers = users.filter(u =>
-    !u.isAdmin && u.username.toLowerCase() !== "admin" &&
-    (u.username.toLowerCase().includes(userSearch.toLowerCase()) ||
-     u.licenseKey.toLowerCase().includes(userSearch.toLowerCase()))
-  );
+  const filteredUsers = users.filter(u => {
+    if (isReadOnly && (u.isAdmin || u.status !== "active")) {
+      return false;
+    }
+    if (!isReadOnly) {
+      if (showOnlyAdmins) {
+        if (!u.isAdmin) return false;
+      } else {
+        if (u.isAdmin) return false;
+      }
+    }
+    const q = userSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      u.username.toLowerCase().includes(q) ||
+      (u.licenseKey && u.licenseKey.toLowerCase().includes(q)) ||
+      (u.roleLabel && u.roleLabel.toLowerCase().includes(q))
+    );
+  });
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -1331,27 +1410,49 @@ function AdminPanel({
                 />
               </div>
 
-              {/* Submit Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-800">
-                <button
-                  type="button"
-                  onClick={() => setApprovalModalUser(null)}
-                  className="px-4 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold transition-all cursor-pointer"
-                >
-                  Ακύρωση
-                </button>
-                <button
-                  type="submit"
-                  disabled={approvingUser === approvalModalUser.username}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black font-black text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  {approvingUser === approvalModalUser.username ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="w-4 h-4 fill-black text-emerald-400" />
-                  )}
-                  <span>Αποθήκευση & Ενεργοποίηση</span>
-                </button>
+              {/* Submit / Action Buttons */}
+              <div className="flex items-center justify-between gap-3 pt-4 border-t border-gray-800">
+                {!isReadOnly ? (
+                  <button
+                    type="button"
+                    disabled={deletingUser === approvalModalUser.username}
+                    onClick={() => {
+                      const u = approvalModalUser;
+                      setApprovalModalUser(null);
+                      openDeleteModal(u);
+                    }}
+                    className="px-3.5 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/30 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {deletingUser === approvalModalUser.username ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                    <span>Διαγραφή</span>
+                  </button>
+                ) : <div />}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setApprovalModalUser(null)}
+                    className="px-4 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Ακύρωση
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={approvingUser === approvalModalUser.username}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black font-black text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {approvingUser === approvalModalUser.username ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 fill-black text-emerald-400" />
+                    )}
+                    <span>Αποθήκευση</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -1360,11 +1461,28 @@ function AdminPanel({
 
       {/* Bottom Card: User Accounts List */}
       <div className="bg-panel rounded-3xl border border-gray-800 shadow-xl p-6 space-y-6">
+        {deleteNotification && (
+          <div className={`p-4 rounded-2xl border flex items-center justify-between gap-3 text-xs font-bold ${
+            deleteNotification.type === "success"
+              ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+              : "bg-red-500/15 border-red-500/40 text-red-300"
+          }`}>
+            <span>{deleteNotification.message}</span>
+            <button
+              type="button"
+              onClick={() => setDeleteNotification(null)}
+              className="text-gray-400 hover:text-white cursor-pointer font-extrabold px-1"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 pb-4 border-b border-gray-800">
           <div>
             <h3 className="text-base font-black text-white flex items-center gap-2">
               <User className="w-5 h-5 text-emerald-400" />
-              <span>Ενεργές συνδρομές ({filteredUsers.length})</span>
+              <span>Λογαριασμοί</span>
             </h3>
           </div>
 
@@ -1372,12 +1490,51 @@ function AdminPanel({
             <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
             <input
               type="text"
-              placeholder="Αναζήτηση με Όνομα Χρήστη..."
+              placeholder="Αναζήτηση με Όνομα Χρήστη / Ρόλο..."
               value={userSearch}
               onChange={(e) => setUserSearch(e.target.value)}
               className="w-full bg-dark pl-10 pr-4 py-2.5 rounded-xl border border-gray-800 text-xs focus:border-primary focus:outline-none text-white placeholder-gray-500"
             />
           </div>
+        </div>
+
+        {/* Minimalist Sub-Bar: Account Counter & Admin Toggle Switch */}
+        <div className="flex items-center justify-between gap-3 text-xs px-1">
+          {/* Account Count placed next to the switch */}
+          <div className="flex items-center gap-1.5 text-xs text-gray-400">
+            <span className="text-gray-500 text-[11px]">Σύνολο:</span>
+            <span className="text-white font-bold bg-dark px-2 py-0.5 rounded-lg border border-gray-800 text-xs">
+              {filteredUsers.length}
+            </span>
+            <span className="text-[11px] text-gray-500 hidden sm:inline">
+              {showOnlyAdmins
+                ? (filteredUsers.length === 1 ? "διαχειριστής" : "διαχειριστές")
+                : (filteredUsers.length === 1 ? "λογαριασμός" : "λογαριασμοί")}
+            </span>
+          </div>
+
+          {/* Minimalist Admin Filter Toggle */}
+          {!isReadOnly && (
+            <div className="flex items-center gap-2 bg-dark/60 border border-gray-800/80 px-2.5 py-1 rounded-xl">
+              <span className={`text-[11px] font-semibold transition-colors select-none ${
+                showOnlyAdmins ? "text-amber-400 font-bold" : "text-gray-400"
+              }`}>
+                {showOnlyAdmins ? "🛡️ Μόνο Admins" : "Admins"}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showOnlyAdmins}
+                onClick={() => setShowOnlyAdmins(!showOnlyAdmins)}
+                className={`w-8 h-4.5 rounded-full p-0.5 transition-colors duration-200 ease-in-out cursor-pointer flex items-center shrink-0 ${
+                  showOnlyAdmins ? "bg-amber-500 justify-end" : "bg-gray-700 justify-start"
+                }`}
+                title={showOnlyAdmins ? "Εμφάνιση μόνο διαχειριστών (Ενεργό)" : "Εμφάνιση μόνο συνδρομητών (Ανενεργό)"}
+              >
+                <div className="w-3.5 h-3.5 rounded-full bg-white shadow-sm transform transition-transform" />
+              </button>
+            </div>
+          )}
         </div>
 
         {loadingUsers ? (
@@ -1387,12 +1544,17 @@ function AdminPanel({
           </div>
         ) : filteredUsers.length === 0 ? (
           <div className="py-12 text-center text-gray-500 text-sm">
-            {isReadOnly ? "Δεν υπάρχουν ενεργές συνδρομές αυτή τη στιγμή." : "Δεν βρέθηκαν εγγεγραμμένοι χρήστες."}
+            {showOnlyAdmins
+              ? "Δεν βρέθηκαν λογαριασμοί διαχειριστών."
+              : isReadOnly
+              ? "Δεν υπάρχουν ενεργές συνδρομές αυτή τη στιγμή."
+              : "Δεν βρέθηκαν συνδρομητές."}
           </div>
         ) : (
           <div className="space-y-3">
             {filteredUsers.map((u) => {
               const isPending = u.status === "pending";
+              const isCurrentUser = u.username.toLowerCase() === currentUsername.toLowerCase();
 
               return (
                 <div
@@ -1400,13 +1562,17 @@ function AdminPanel({
                   className={`p-4 sm:p-5 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
                     (u.screenRecordAlertsCount && u.screenRecordAlertsCount > 0)
                       ? "bg-red-950/30 border-red-500/60 shadow-lg shadow-red-500/10"
+                      : u.isAdmin
+                      ? (u.username === "admings" 
+                          ? "bg-amber-500/10 border-amber-500/40 shadow-lg shadow-amber-500/5"
+                          : "bg-cyan-950/20 border-cyan-500/30")
                       : isPending
                       ? "bg-amber-500/10 border-amber-500/40 shadow-lg shadow-amber-500/5"
                       : "bg-dark border-gray-800 hover:border-gray-700"
                   }`}
                 >
                   {/* Renewal Dots at the top-left of the user bar */}
-                  {(u.renewalsCount || 0) > 0 && (
+                  {!u.isAdmin && (u.renewalsCount || 0) > 0 && (
                     <div className="flex items-center gap-1.5 pb-2 border-b border-gray-800/50" title={`Ανανεώσεις συνδρομής: ${u.renewalsCount}`}>
                       <span className="text-[10px] font-extrabold text-gray-500 mr-1 uppercase tracking-wider">Ανανεώσεις:</span>
                       {Array.from({ length: Math.min(u.renewalsCount || 1, 30) }).map((_, idx) => (
@@ -1442,40 +1608,60 @@ function AdminPanel({
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     {/* Left: Account Details */}
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-primary/20 text-primary border border-primary/30 rounded-xl flex items-center justify-center font-black text-sm shrink-0">
-                        {u.username.substring(0, 2).toUpperCase()}
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shrink-0 border ${
+                        u.isAdmin
+                          ? (u.username === "admings"
+                              ? "bg-amber-500/20 text-amber-400 border-amber-500/40"
+                              : "bg-cyan-500/20 text-cyan-400 border-cyan-500/40")
+                          : "bg-primary/20 text-primary border-primary/30"
+                      }`}>
+                        {u.isAdmin ? (u.username === "admings" ? "👑" : "🛡️") : u.username.substring(0, 2).toUpperCase()}
                       </div>
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-black text-white">{u.username}</span>
-                          {u.isAdmin && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                              🛡️ ADMIN
-                            </span>
-                          )}
-
-                          {/* Library Tier Badge */}
-                          {u.libraryAccess === "gctunes" ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                              <span>🧸</span>
-                              <span>Greek Cartoons</span>
-                            </span>
-                          ) : u.libraryAccess === "greek_streaming" ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 flex items-center gap-1">
-                              <span>🎬</span>
-                              <span>Greek Streaming</span>
+                          {u.isAdmin ? (
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border flex items-center gap-1 ${
+                              u.username === "admings"
+                                ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                                : u.username === "adminvlassis" || u.isReadOnlyAdmin
+                                ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                                : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                            }`}>
+                              <span>
+                                {u.username === "admings"
+                                  ? "👑 SUPER ADMIN"
+                                  : (u.username === "adminvlassis" || u.isReadOnlyAdmin ? "🛡️ LIMITED ADMIN" : "🛡️ ADMIN")}
+                              </span>
                             </span>
                           ) : (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                              <span>🌟</span>
-                              <span>Και τα δύο</span>
-                            </span>
+                            /* Library Tier Badge for regular users */
+                            u.libraryAccess === "gctunes" ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                <span>🧸</span>
+                                <span>Greek Cartoons</span>
+                              </span>
+                            ) : u.libraryAccess === "greek_streaming" ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 flex items-center gap-1">
+                                <span>🎬</span>
+                                <span>Greek Streaming</span>
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                                <span>🌟</span>
+                                <span>Και τα δύο</span>
+                              </span>
+                            )
                           )}
                         </div>
 
-                        <div className="text-xs mt-0.5 flex items-center gap-2">
-                          <span className="text-gray-400">Απομένουν:</span>
-                          {isPending ? (
+                        <div className="text-xs mt-0.5 flex items-center gap-2 flex-wrap">
+                          <span className="text-gray-400">Κατάσταση:</span>
+                          {u.isAdmin ? (
+                            <span className="text-amber-400 font-extrabold flex items-center gap-1">
+                              👑 Απεριόριστη Πρόσβαση (Admin)
+                            </span>
+                          ) : isPending ? (
                             <span className="text-amber-400 font-extrabold flex items-center gap-1">
                               🔴 0 ημέρες (Σε αναμονή)
                             </span>
@@ -1488,68 +1674,94 @@ function AdminPanel({
                       </div>
                     </div>
 
-                    {/* Right: APPROVAL / ACCESS CONFIG BUTTONS (Hidden in Read-Only) */}
-                    {!u.isAdmin && !isReadOnly && (
+                    {/* Right: APPROVAL / ACCESS CONFIG & DELETE BUTTONS (Hidden in Read-Only) */}
+                    {!isReadOnly && (
                       <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                        {/* Quick Category switcher buttons */}
-                        <div className="hidden sm:flex items-center gap-1 bg-dark/80 p-1 rounded-xl border border-gray-800">
-                          <button
-                            type="button"
-                            title="Ορισμός σε Greek Cartoons"
-                            onClick={() => handleUpdateUserAccessQuick(u.username, "gctunes")}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
-                              u.libraryAccess === "gctunes"
-                                ? "bg-amber-500 text-black shadow-xs"
-                                : "text-gray-400 hover:text-white"
-                            }`}
-                          >
-                            🧸 GC
-                          </button>
-                          <button
-                            type="button"
-                            title="Ορισμός σε Greek Streaming"
-                            onClick={() => handleUpdateUserAccessQuick(u.username, "greek_streaming")}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
-                              u.libraryAccess === "greek_streaming"
-                                ? "bg-cyan-500 text-black shadow-xs"
-                                : "text-gray-400 hover:text-white"
-                            }`}
-                          >
-                            🎬 GS
-                          </button>
-                          <button
-                            type="button"
-                            title="Ορισμός σε Και τα δύο"
-                            onClick={() => handleUpdateUserAccessQuick(u.username, "both")}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
-                              !u.libraryAccess || u.libraryAccess === "both"
-                                ? "bg-emerald-500 text-black shadow-xs"
-                                : "text-gray-400 hover:text-white"
-                            }`}
-                          >
-                            🌟 Όλα
-                          </button>
-                        </div>
+                        {/* If Regular User: Quick Category switcher buttons & Settings */}
+                        {!u.isAdmin && (
+                          <>
+                            <div className="hidden sm:flex items-center gap-1 bg-dark/80 p-1 rounded-xl border border-gray-800">
+                              <button
+                                type="button"
+                                title="Ορισμός σε Greek Cartoons"
+                                onClick={() => handleUpdateUserAccessQuick(u.username, "gctunes")}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                                  u.libraryAccess === "gctunes"
+                                    ? "bg-amber-500 text-black shadow-xs"
+                                    : "text-gray-400 hover:text-white"
+                                }`}
+                              >
+                                🧸 GC
+                              </button>
+                              <button
+                                type="button"
+                                title="Ορισμός σε Greek Streaming"
+                                onClick={() => handleUpdateUserAccessQuick(u.username, "greek_streaming")}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                                  u.libraryAccess === "greek_streaming"
+                                    ? "bg-cyan-500 text-black shadow-xs"
+                                    : "text-gray-400 hover:text-white"
+                                }`}
+                              >
+                                🎬 GS
+                              </button>
+                              <button
+                                type="button"
+                                title="Ορισμός σε Και τα δύο"
+                                onClick={() => handleUpdateUserAccessQuick(u.username, "both")}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                                  !u.libraryAccess || u.libraryAccess === "both"
+                                    ? "bg-emerald-500 text-black shadow-xs"
+                                    : "text-gray-400 hover:text-white"
+                                }`}
+                              >
+                                🌟 Όλα
+                              </button>
+                            </div>
 
-                        {/* Open Detailed Modal button */}
-                        <button
-                          onClick={() => openApprovalModal(u)}
-                          disabled={approvingUser === u.username}
-                          className={`px-4 py-2 text-xs font-black rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer shrink-0 ${
-                            isPending
-                              ? "bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black shadow-emerald-500/20"
-                              : "bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700"
-                          }`}
-                        >
-                          {approvingUser === u.username ? (
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                          ) : isPending ? (
-                            <CheckCircle2 className="w-4 h-4 fill-black text-emerald-400" />
-                          ) : (
-                            <Settings className="w-3.5 h-3.5 text-primary" />
-                          )}
-                          <span>{isPending ? "⚡ Έγκριση & Δικαιοδοσία" : "⚙️ Ρύθμιση Πρόσβασης"}</span>
-                        </button>
+                            {/* Open Detailed Modal button */}
+                            <button
+                              onClick={() => openApprovalModal(u)}
+                              disabled={approvingUser === u.username}
+                              className={`px-4 py-2 text-xs font-black rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                                isPending
+                                  ? "bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black shadow-emerald-500/20"
+                                  : "bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700"
+                              }`}
+                            >
+                              {approvingUser === u.username ? (
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                              ) : isPending ? (
+                                <CheckCircle2 className="w-4 h-4 fill-black text-emerald-400" />
+                              ) : (
+                                <Settings className="w-3.5 h-3.5 text-primary" />
+                              )}
+                              <span>{isPending ? "⚡ Έγκριση & Δικαιοδοσία" : "⚙️ Ρυθμίσεις"}</span>
+                            </button>
+                          </>
+                        )}
+
+                        {/* Direct Delete Account button (Available for both user and admin accounts, protected if current logged-in account) */}
+                        {isCurrentUser ? (
+                          <span className="px-3 py-2 rounded-xl bg-gray-800/80 text-gray-500 border border-gray-700/50 text-[11px] font-bold shrink-0" title="Τρέχων συνδεδεμένος λογαριασμός">
+                            🔒 Ενεργός
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            title={`Διαγραφή ${u.isAdmin ? 'Διαχειριστή' : 'Λογαριασμού'} (${u.username})`}
+                            disabled={deletingUser === u.username}
+                            onClick={() => openDeleteModal(u)}
+                            className="px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/30 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                          >
+                            {deletingUser === u.username ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                            <span>Διαγραφή</span>
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1559,6 +1771,58 @@ function AdminPanel({
           </div>
         )}
       </div>
+
+      {/* In-UI Delete Confirmation Modal (Bypasses iframe alert/confirm limitations) */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#141824] border border-red-500/30 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-3.5 mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 border border-red-500/30 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">Επιβεβαίωση Διαγραφής</h3>
+                <p className="text-xs text-red-400 font-bold">
+                  {userToDelete.isAdmin ? "⚠️ Οριστική διαγραφή Διαχειριστή" : "Οριστική διαγραφή Πελάτη"}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-sm text-gray-300 mb-6 leading-relaxed">
+              Είστε βέβαιοι ότι θέλετε να διαγράψετε οριστικά τον λογαριασμό {userToDelete.isAdmin ? "διαχειριστή " : ""}<strong className="text-white font-black">"{userToDelete.username}"</strong>;
+              <br /><br />
+              <span className="text-xs text-gray-400 block bg-dark/60 p-3 rounded-xl border border-gray-800">
+                {userToDelete.isAdmin
+                  ? "⚠️ Ο διαχειριστής θα αφαιρεθεί οριστικά και δεν θα μπορεί πλέον να συνδεθεί στην εφαρμογή ή στον πίνακα ελέγχου."
+                  : "⚠️ Όλα τα δεδομένα, το κλειδί συνδρομής, οι συνδεδεμένες συσκευές και τα μηνύματα του χρήστη θα αφαιρεθούν μόνιμα από τη βάση δεδομένων."}
+              </span>
+            </p>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setUserToDelete(null)}
+                className="px-4 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold transition-all cursor-pointer"
+              >
+                Ακύρωση
+              </button>
+              <button
+                type="button"
+                disabled={deletingUser === userToDelete.username}
+                onClick={() => executeDeleteUser(userToDelete.username)}
+                className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs shadow-lg shadow-red-600/30 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {deletingUser === userToDelete.username ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>Οριστική Διαγραφή</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

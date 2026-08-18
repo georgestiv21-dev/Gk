@@ -25,8 +25,11 @@ export default function AppBar({
   const navigate = useNavigate();
 
   const handleLogout = () => {
+    localStorage.removeItem('gc_remember_me');
     localStorage.removeItem('licenseKey');
     localStorage.removeItem('isAdmin');
+    localStorage.removeItem('isReadOnlyAdmin');
+    sessionStorage.clear();
     navigate('/login');
   };
 

@@ -9,8 +9,10 @@ export default function Login() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [autoChecking, setAutoChecking] = useState(true);
 
   const navigate = useNavigate();
 
@@ -24,11 +26,40 @@ export default function Login() {
   };
 
   useEffect(() => {
+    const isRemembered = localStorage.getItem('gc_remember_me') === 'true';
     const savedUser = localStorage.getItem('username');
-    if (savedUser) {
-      setUsername(savedUser);
+    const savedKey = localStorage.getItem('licenseKey');
+
+    // Auto-login ONLY if the user previously selected "Να παραμείνω συνδεδεμένος"
+    if (isRemembered && savedUser && savedKey) {
+      const deviceId = getDeviceId();
+      axios.post('/api/user-status', { username: savedUser, licenseKey: savedKey, deviceId })
+        .then(res => {
+          if (res.data.status === 'active' || res.data.status === 'pending' || res.data.isAdmin) {
+            navigate('/dashboard', { replace: true });
+          } else {
+            localStorage.removeItem('gc_remember_me');
+            localStorage.removeItem('licenseKey');
+            setAutoChecking(false);
+          }
+        })
+        .catch(() => {
+          localStorage.removeItem('gc_remember_me');
+          setAutoChecking(false);
+        });
+    } else {
+      // If not set to remember, remove any stored key so no automatic background login occurs
+      if (!isRemembered) {
+        localStorage.removeItem('licenseKey');
+        localStorage.removeItem('isAdmin');
+        localStorage.removeItem('isReadOnlyAdmin');
+      }
+      if (savedUser) {
+        setUsername(savedUser);
+      }
+      setAutoChecking(false);
     }
-  }, []);
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,9 +78,16 @@ export default function Login() {
         });
 
         if (res.data.success) {
+          if (rememberMe) {
+            localStorage.setItem('gc_remember_me', 'true');
+          } else {
+            localStorage.removeItem('gc_remember_me');
+          }
           localStorage.setItem('username', res.data.username);
           localStorage.setItem('licenseKey', res.data.licenseKey);
           localStorage.setItem('isAdmin', 'false');
+          sessionStorage.setItem('username', res.data.username);
+          sessionStorage.setItem('licenseKey', res.data.licenseKey);
           navigate('/dashboard');
         }
       } else {
@@ -61,8 +99,17 @@ export default function Login() {
         });
 
         if (res.data.success) {
+          const userKey = res.data.licenseKey || res.data.key || '';
+          if (rememberMe) {
+            localStorage.setItem('gc_remember_me', 'true');
+          } else {
+            localStorage.removeItem('gc_remember_me');
+          }
           localStorage.setItem('username', res.data.username);
-          localStorage.setItem('licenseKey', res.data.key);
+          localStorage.setItem('licenseKey', userKey);
+          sessionStorage.setItem('username', res.data.username);
+          sessionStorage.setItem('licenseKey', userKey);
+
           if (res.data.isAdmin) {
             localStorage.setItem('isAdmin', 'true');
             localStorage.setItem('isReadOnlyAdmin', res.data.isReadOnlyAdmin ? 'true' : 'false');
@@ -79,6 +126,20 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  if (autoChecking) {
+    return (
+      <div className="min-h-screen bg-darker text-white flex flex-col items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-4">
+          <Logo size="lg" />
+          <div className="flex items-center gap-2.5 text-sm text-gray-400 font-bold mt-4">
+            <RefreshCw className="w-5 h-5 animate-spin text-primary" />
+            <span>Έλεγχος αποθηκευμένης σύνδεσης...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-darker text-white flex flex-col relative overflow-x-hidden">
@@ -166,6 +227,21 @@ export default function Login() {
                     required
                   />
                 </div>
+              </div>
+
+              {/* Stay Logged In (Remember Me) Checkbox */}
+              <div className="pt-1 pb-1">
+                <label className="flex items-center gap-3 text-xs text-gray-300 hover:text-white cursor-pointer select-none group">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded-md border-gray-700 bg-dark text-primary focus:ring-primary focus:ring-offset-dark cursor-pointer accent-primary shrink-0 transition-all"
+                  />
+                  <span className="font-semibold text-gray-300 group-hover:text-white transition-colors">
+                    Να παραμείνω συνδεδεμένος
+                  </span>
+                </label>
               </div>
 
               <button

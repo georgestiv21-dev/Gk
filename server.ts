@@ -22,27 +22,36 @@ app.use(express.urlencoded({ limit: "50gb", extended: true }));
 
 // In-memory Database for Demo
 const validLicenseKeys = new Map<string, { expiresAt: number, deviceIds: string[] }>();
-const ADMIN_KEY = "ADMIN-XMR-9999"; // Hardcoded admin key that never expires
+const ADMIN_KEY = "ADMIN-XMR-9999"; // Master admin key that never expires
 const ADMIN_VLASSIS_KEY = "ADMIN-VLASSIS-2026"; // Read-only admin key with 3 devices limit
 
 function isAdminKey(keyOrUser: string = ""): boolean {
   if (!keyOrUser) return false;
-  const k = keyOrUser.trim();
-  return k === ADMIN_KEY || k === ADMIN_VLASSIS_KEY || k.toLowerCase() === "admingctoons" || k.toLowerCase() === "admin" || k.toLowerCase() === "adminvlassis";
+  const k = keyOrUser.trim().toLowerCase();
+  if (keyOrUser.trim() === ADMIN_KEY) return true;
+  if (k === "admings") {
+    const u = userAccounts.get("admings");
+    return !!u;
+  }
+  const u = userAccounts.get(k);
+  if (u && (u.licenseKey === ADMIN_KEY || u.licenseKey === ADMIN_VLASSIS_KEY)) {
+    return true;
+  }
+  return false;
 }
 
 function isReadOnlyAdminKey(keyOrUser: string = ""): boolean {
   if (!keyOrUser) return false;
-  const k = keyOrUser.trim();
-  return k === ADMIN_VLASSIS_KEY || k.toLowerCase() === "adminvlassis";
+  const k = keyOrUser.trim().toLowerCase();
+  if (keyOrUser.trim() === ADMIN_VLASSIS_KEY) return true;
+  const u = userAccounts.get(k);
+  if (u && u.licenseKey === ADMIN_VLASSIS_KEY) return true;
+  return false;
 }
 const DEFAULT_EXPIRY = Date.now() + 365 * 24 * 60 * 60 * 1000;
 
 const now = Date.now();
 const DAY = 24 * 60 * 60 * 1000;
-
-validLicenseKeys.set(ADMIN_KEY, { expiresAt: 9999999999999, deviceIds: ["dev-admin-pc"] });
-validLicenseKeys.set(ADMIN_VLASSIS_KEY, { expiresAt: 9999999999999, deviceIds: ["dev_vlassis_pc_01", "dev_vlassis_phone_02"] });
 
 // Anonymous Chat System Data Structure (RAM only, no logs)
 export interface ChatMessage {
@@ -166,17 +175,87 @@ function loadDatabase() {
       console.error("Error loading database.json:", e);
     }
   } else {
-    console.log("No database.json found, starting fresh.");
+    console.log("No database.json found, initializing fresh database.");
   }
 }
 
-// Initial Load
-loadDatabase();
+function initializeDatabase() {
+  const isFirstTime = !fs.existsSync(DB_FILE);
+  if (!isFirstTime) {
+    loadDatabase();
+  }
+
+  // Ensure Master Super Admin always exists
+  if (!userAccounts.has("admings")) {
+    userAccounts.set("admings", {
+      username: "admings",
+      passwordHash: "g6975767770",
+      licenseKey: ADMIN_KEY,
+      status: "active",
+      createdAt: Date.now(),
+      expiresAt: 9999999999999,
+    });
+  }
+  if (!validLicenseKeys.has(ADMIN_KEY)) {
+    validLicenseKeys.set(ADMIN_KEY, { expiresAt: 9999999999999, deviceIds: ["dev-admin-pc"] });
+  }
+
+  // Seed default secondary accounts ONLY on fresh first-time installation
+  if (isFirstTime) {
+    userAccounts.set("admingctoons", {
+      username: "admingctoons",
+      passwordHash: "g6975767770",
+      licenseKey: ADMIN_KEY,
+      status: "active",
+      createdAt: Date.now(),
+      expiresAt: 9999999999999,
+    });
+
+    userAccounts.set("admin", {
+      username: "admin",
+      passwordHash: "admin",
+      licenseKey: ADMIN_KEY,
+      status: "active",
+      createdAt: Date.now(),
+      expiresAt: 9999999999999,
+    });
+
+    userAccounts.set("adminvlassis", {
+      username: "adminvlassis",
+      passwordHash: "adminVlassis132",
+      licenseKey: ADMIN_VLASSIS_KEY,
+      status: "active",
+      createdAt: Date.now(),
+      expiresAt: 9999999999999,
+    });
+    validLicenseKeys.set(ADMIN_VLASSIS_KEY, { expiresAt: 9999999999999, deviceIds: ["dev_vlassis_pc_01", "dev_vlassis_phone_02"] });
+
+    userDevicesMap.set("adminvlassis", [
+      {
+        deviceId: "dev_vlassis_pc_01",
+        deviceName: "Windows PC (Vlassis Admin)",
+        ip: "192.168.1.100",
+        lastActive: Date.now() - 1000 * 60 * 5
+      },
+      {
+        deviceId: "dev_vlassis_phone_02",
+        deviceName: "iPhone / iPad (Vlassis)",
+        ip: "192.168.1.101",
+        lastActive: Date.now() - 1000 * 60 * 30
+      }
+    ]);
+    userDevicesMap.set(ADMIN_VLASSIS_KEY.toLowerCase(), userDevicesMap.get("adminvlassis")!);
+
+    saveDatabase();
+  }
+}
+
+// Initial Load & Boot
+initializeDatabase();
 
 // Auto-save every 10 seconds
 setInterval(saveDatabase, 10000);
 // ---------------------------------
-
 
 function parseDeviceName(userAgent: string = "", customName?: string): string {
   if (customName && customName !== "dev-default" && !customName.startsWith("dev_")) {
@@ -215,50 +294,6 @@ function registerUserDevice(userOrKey: string, deviceId: string, req: express.Re
 
   userDevicesMap.set(cleanKey, devices);
 }
-
-// Default Admin users
-userAccounts.set("admingctoons", {
-  username: "admingctoons",
-  passwordHash: "g6975767770",
-  licenseKey: ADMIN_KEY,
-  status: "active",
-  createdAt: Date.now(),
-  expiresAt: 9999999999999,
-});
-
-userAccounts.set("admin", {
-  username: "admin",
-  passwordHash: "admin",
-  licenseKey: ADMIN_KEY,
-  status: "active",
-  createdAt: Date.now(),
-  expiresAt: 9999999999999,
-});
-
-userAccounts.set("adminvlassis", {
-  username: "adminvlassis",
-  passwordHash: "adminVlassis132",
-  licenseKey: ADMIN_VLASSIS_KEY,
-  status: "active",
-  createdAt: Date.now(),
-  expiresAt: 9999999999999,
-});
-
-userDevicesMap.set("adminvlassis", [
-  {
-    deviceId: "dev_vlassis_pc_01",
-    deviceName: "Windows PC (Vlassis Admin)",
-    ip: "192.168.1.100",
-    lastActive: Date.now() - 1000 * 60 * 5
-  },
-  {
-    deviceId: "dev_vlassis_phone_02",
-    deviceName: "iPhone / iPad (Vlassis)",
-    ip: "192.168.1.101",
-    lastActive: Date.now() - 1000 * 60 * 30
-  }
-]);
-userDevicesMap.set(ADMIN_VLASSIS_KEY.toLowerCase(), userDevicesMap.get("adminvlassis")!);
 
 // Helper to get or create chat session for a user/key
 function getOrCreateSession(keyOrUsername: string, deviceId: string = "dev-default"): ChatSession {
@@ -355,28 +390,30 @@ app.post("/api/login", (req, res) => {
   const cleanPassword = (password || "").trim();
   const trimmedKey = (licenseKey || "").trim().toUpperCase();
 
-  // Admin instant login via key or admingctoons / admin credentials
+  // Admin instant login via key or admings / admingctoons / admin credentials (REQUIRES VALID PASSWORD OR ADMIN KEY)
   if (
     trimmedKey === ADMIN_KEY ||
-    (cleanUsername === "admingctoons" && (cleanPassword === "g6975767770" || cleanPassword === "")) ||
-    (cleanUsername === "admin" && (cleanPassword === "admin" || cleanPassword === "g6975767770" || cleanPassword === ""))
+    (cleanUsername === "admings" && cleanPassword === "g6975767770") ||
+    (cleanUsername === "admingctoons" && (cleanPassword === "g6975767770" || cleanPassword === "admin")) ||
+    (cleanUsername === "admin" && (cleanPassword === "admin" || cleanPassword === "g6975767770"))
   ) {
     return res.json({
       success: true,
-      username: cleanUsername || "admingctoons",
+      username: cleanUsername || "admings",
       isAdmin: true,
       isReadOnlyAdmin: false,
       status: "active",
       libraryAccess: "both",
       key: ADMIN_KEY,
+      licenseKey: ADMIN_KEY,
       expiresAt: 9999999999999
     });
   }
 
-  // Read-Only Limited Admin login (adminvlassis with max 3 devices)
+  // Read-Only Limited Admin login (adminvlassis with max 3 devices) (REQUIRES VALID PASSWORD OR ADMIN_VLASSIS_KEY)
   if (
     trimmedKey === ADMIN_VLASSIS_KEY ||
-    (cleanUsername === "adminvlassis" && (cleanPassword === "adminVlassis132" || cleanPassword === ""))
+    (cleanUsername === "adminvlassis" && cleanPassword === "adminVlassis132")
   ) {
     const keyData = validLicenseKeys.get(ADMIN_VLASSIS_KEY) || { expiresAt: 9999999999999, deviceIds: [] };
     if (!keyData.deviceIds.includes(deviceId)) {
@@ -448,8 +485,7 @@ app.post("/api/login", (req, res) => {
     }
 
     if (!validLicenseKeys.has(trimmedKey) && !matchedUser) {
-      // Auto-provision pending license key
-      validLicenseKeys.set(trimmedKey, { expiresAt: 0, deviceIds: [deviceId] });
+      return res.status(400).json({ error: "Μη έγκυρο κλειδί πρόσβασης ή λογαριασμός." });
     }
 
     const keyData = validLicenseKeys.get(trimmedKey);
@@ -478,25 +514,39 @@ app.post("/api/user-status", (req, res) => {
   const cleanUsername = (username || "").trim().toLowerCase();
   const trimmedKey = (licenseKey || "").trim().toUpperCase();
 
-  if (cleanUsername === "admin" || cleanUsername === "admingctoons" || trimmedKey === ADMIN_KEY) {
+  // Strict Admin Session Check
+  if (trimmedKey === ADMIN_KEY || ((cleanUsername === "admin" || cleanUsername === "admingctoons") && trimmedKey === ADMIN_KEY)) {
     return res.json({ status: "active", isAdmin: true, isReadOnlyAdmin: false, libraryAccess: "both" });
   }
 
-  if (cleanUsername === "adminvlassis" || trimmedKey === ADMIN_VLASSIS_KEY) {
+  if (trimmedKey === ADMIN_VLASSIS_KEY || (cleanUsername === "adminvlassis" && trimmedKey === ADMIN_VLASSIS_KEY)) {
     return res.json({ status: "active", isAdmin: true, isReadOnlyAdmin: true, libraryAccess: "both" });
+  }
+
+  // If claimed to be admin but key doesn't match:
+  if (cleanUsername === "admin" || cleanUsername === "admingctoons" || cleanUsername === "adminvlassis") {
+    return res.status(401).json({ error: "Μη εξουσιοδοτημένη πρόσβαση διαχειριστή." });
   }
 
   if (cleanUsername) {
     const user = userAccounts.get(cleanUsername);
-    if (user) {
-      const keyData = validLicenseKeys.get(user.licenseKey);
-      const now = Date.now();
-      const isActive = (keyData && keyData.expiresAt > now) || user.status === "active";
-      return res.json({ status: isActive ? "active" : "pending", isAdmin: false, libraryAccess: user.libraryAccess || "both" });
+    if (!user) {
+      return res.status(401).json({ error: "Ο λογαριασμός δεν βρέθηκε." });
     }
+    if (trimmedKey && user.licenseKey !== trimmedKey) {
+      return res.status(401).json({ error: "Μη έγκυρο κλειδί συνεδρίας." });
+    }
+    const keyData = validLicenseKeys.get(user.licenseKey);
+    const now = Date.now();
+    const isActive = (keyData && keyData.expiresAt > now) || user.status === "active";
+    return res.json({ status: isActive ? "active" : "pending", isAdmin: false, libraryAccess: user.libraryAccess || "both" });
   }
 
   if (trimmedKey) {
+    const keyData = validLicenseKeys.get(trimmedKey);
+    if (!keyData) {
+      return res.status(401).json({ error: "Μη έγκυρο κλειδί πρόσβασης." });
+    }
     let matchedUser: UserAccount | undefined;
     for (const u of userAccounts.values()) {
       if (u.licenseKey === trimmedKey) {
@@ -504,13 +554,12 @@ app.post("/api/user-status", (req, res) => {
         break;
       }
     }
-    const keyData = validLicenseKeys.get(trimmedKey);
     const now = Date.now();
-    const isActive = (keyData && keyData.expiresAt > now);
+    const isActive = (keyData.expiresAt > now) || (matchedUser && matchedUser.status === "active");
     return res.json({ status: isActive ? "active" : "pending", isAdmin: false, libraryAccess: matchedUser?.libraryAccess || "both" });
   }
 
-  return res.json({ status: "pending", isAdmin: false, libraryAccess: "both" });
+  return res.status(401).json({ error: "Απαιτείται σύνδεση." });
 });
 
 // --- ANONYMOUS CHAT & ACTIVATION SYSTEM ENDPOINTS ---
@@ -797,9 +846,9 @@ app.post("/api/login", (req, res) => {
 
 // --- ADMIN USER APPROVAL & TESTING BYPASS ENDPOINTS ---
 
-// 1. Admin: Fetch All User Accounts
+// 1. Admin: Fetch All User Accounts (Including Admin Accounts)
 app.get("/api/admin/users", (req, res) => {
-  const adminKey = (req.headers["x-admin-key"] as string) || (req.query.adminKey as string);
+  const adminKey = (req.headers["x-admin-key"] as string) || (req.query.adminKey as string) || (req.headers["x-username"] as string);
   if (!isAdminKey(adminKey)) {
     return res.status(403).json({ error: "Δεν έχετε δικαιώματα διαχειριστή." });
   }
@@ -807,13 +856,14 @@ app.get("/api/admin/users", (req, res) => {
   const isReadOnly = isReadOnlyAdminKey(adminKey);
   const now = Date.now();
   let list = Array.from(userAccounts.values())
-    .filter(u => u.username !== "admin" && u.username !== "admingctoons" && u.username !== "adminvlassis")
     .map(u => {
+      const isUserAdmin = u.username === "admings" || u.username === "admin" || u.username === "admingctoons" || u.username === "adminvlassis" || u.licenseKey === ADMIN_KEY || u.licenseKey === ADMIN_VLASSIS_KEY;
+      const isVlassis = u.username === "adminvlassis" || u.licenseKey === ADMIN_VLASSIS_KEY;
       const keyData = validLicenseKeys.get(u.licenseKey);
-      const expiresAt = keyData ? keyData.expiresAt : u.expiresAt;
-      const isActive = u.status === "active" || (expiresAt > now);
+      const expiresAt = isUserAdmin ? 9999999999999 : (keyData ? keyData.expiresAt : u.expiresAt);
+      const isActive = isUserAdmin || u.status === "active" || (expiresAt > now);
       const msRemaining = expiresAt - now;
-      const daysRemaining = Math.max(0, Math.ceil(msRemaining / (24 * 60 * 60 * 1000)));
+      const daysRemaining = isUserAdmin ? 9999 : Math.max(0, Math.ceil(msRemaining / (24 * 60 * 60 * 1000)));
 
       const alertInfo = screenRecordAlertsMap.get(u.username.toLowerCase()) ||
                         screenRecordAlertsMap.get(u.licenseKey.toUpperCase()) ||
@@ -822,12 +872,14 @@ app.get("/api/admin/users", (req, res) => {
       return {
         username: u.username,
         licenseKey: u.licenseKey,
-        status: isActive ? "active" : "pending",
-        createdAt: u.createdAt,
+        status: (isActive ? "active" : "pending") as "active" | "pending",
+        createdAt: u.createdAt || now,
         expiresAt: expiresAt,
         daysRemaining: daysRemaining,
         renewalsCount: u.renewalsCount !== undefined ? u.renewalsCount : (isActive ? 1 : 0),
-        isAdmin: false,
+        isAdmin: isUserAdmin,
+        isReadOnlyAdmin: isVlassis,
+        roleLabel: isUserAdmin ? (isVlassis ? "🛡️ Limited Admin (Vlassis)" : "👑 Super Admin") : "Πελάτης / Χρήστης",
         libraryAccess: u.libraryAccess || "both",
         screenRecordAlertsCount: alertInfo.count,
         lastScreenRecordAlert: alertInfo.lastAlert,
@@ -837,15 +889,17 @@ app.get("/api/admin/users", (req, res) => {
 
   // Read-only admin can ONLY see ACTIVE subscriptions
   if (isReadOnly) {
-    list = list.filter(u => u.status === "active" && u.expiresAt > now);
+    list = list.filter(u => u.status === "active" && u.expiresAt > now && !u.isAdmin);
   }
 
   list.sort((a, b) => {
+    if (a.isAdmin && !b.isAdmin) return -1;
+    if (!a.isAdmin && b.isAdmin) return 1;
     if (a.screenRecordAlertsCount > 0 && b.screenRecordAlertsCount === 0) return -1;
     if (a.screenRecordAlertsCount === 0 && b.screenRecordAlertsCount > 0) return 1;
     if (a.status === "pending" && b.status !== "pending") return -1;
     if (a.status !== "pending" && b.status === "pending") return 1;
-    return b.createdAt - a.createdAt;
+    return (b.createdAt || 0) - (a.createdAt || 0);
   });
 
   res.json({ users: list, isReadOnly });
@@ -1084,35 +1138,80 @@ app.post("/api/admin/users/update-access", (req, res) => {
   });
 });
 
-// 3. User Testing Phase Bypass Activation Endpoint
-app.post("/api/test-bypass-activation", (req, res) => {
-  const { username = "", licenseKey = "" } = req.body;
-  const cleanUsername = (username || "").trim().toLowerCase();
-  const trimmedKey = (licenseKey || "").trim().toUpperCase();
+// 3. Admin: Delete User Account and all associated data
+const deleteUserAccountHandler = (req: any, res: any) => {
+  const headerAdminKey = (req.headers["x-admin-key"] as string) || "";
+  const headerUsername = (req.headers["x-username"] as string) || "";
+  const bodyAdminKey = (req.body?.adminKey as string) || "";
+  const bodyUsername = (req.body?.adminUsername as string) || "";
+  const queryAdminKey = (req.query?.adminKey as string) || "";
 
-  const now = Date.now();
-  const durationMs = 30 * 24 * 60 * 60 * 1000;
-  const newExpiresAt = now + durationMs;
-
-  if (cleanUsername && userAccounts.has(cleanUsername)) {
-    const user = userAccounts.get(cleanUsername)!;
-    user.status = "active";
-    user.expiresAt = newExpiresAt;
-    userAccounts.set(cleanUsername, user);
-
-    const keyData = validLicenseKeys.get(user.licenseKey) || { expiresAt: 0, deviceIds: [] };
-    keyData.expiresAt = newExpiresAt;
-    validLicenseKeys.set(user.licenseKey, keyData);
+  const adminAuth = headerAdminKey || bodyAdminKey || queryAdminKey || headerUsername || bodyUsername;
+  
+  if (!isAdminKey(adminAuth)) {
+    return res.status(403).json({ error: "Δεν έχετε δικαιώματα διαχειριστή." });
+  }
+  if (isReadOnlyAdminKey(adminAuth)) {
+    return res.status(403).json({ error: "Ο λογαριασμός adminvlassis δεν έχει δικαίωμα διαγραφής λογαριασμών." });
   }
 
-  if (trimmedKey) {
-    const keyData = validLicenseKeys.get(trimmedKey) || { expiresAt: 0, deviceIds: [] };
-    keyData.expiresAt = newExpiresAt;
-    validLicenseKeys.set(trimmedKey, keyData);
+  const targetUsername = (req.params.username || req.body?.username || req.query?.username || "").trim().toLowerCase();
+  if (!targetUsername) {
+    return res.status(400).json({ error: "Δεν ορίστηκε όνομα χρήστη προς διαγραφή." });
   }
 
-  res.json({ success: true, status: "active", expiresAt: newExpiresAt });
-});
+  if (targetUsername === "admings") {
+    return res.status(400).json({ error: "Ο κύριος Super Admin λογαριασμός (admings) είναι προστατευμένος και δεν μπορεί να διαγραφεί." });
+  }
+
+  const user = userAccounts.get(targetUsername);
+  const userLicenseKey = user ? user.licenseKey : "";
+
+  // 1. Remove from user accounts map
+  userAccounts.delete(targetUsername);
+
+  // 2. Remove associated license key if present
+  if (userLicenseKey) {
+    if (userLicenseKey !== ADMIN_KEY || targetUsername === "admin" || targetUsername === "admingctoons") {
+      validLicenseKeys.delete(userLicenseKey);
+    }
+  }
+  if (targetUsername === "adminvlassis") {
+    validLicenseKeys.delete(ADMIN_VLASSIS_KEY);
+  }
+
+  // 3. Remove devices
+  userDevicesMap.delete(targetUsername);
+  if (userLicenseKey) {
+    userDevicesMap.delete(userLicenseKey);
+    userDevicesMap.delete(userLicenseKey.toLowerCase());
+  }
+
+  // 4. Remove chat session
+  chatSessions.delete(targetUsername);
+  if (userLicenseKey) {
+    chatSessions.delete(userLicenseKey);
+  }
+
+  // 5. Remove security alerts
+  screenRecordAlertsMap.delete(targetUsername);
+  if (userLicenseKey) {
+    screenRecordAlertsMap.delete(userLicenseKey);
+  }
+
+  // 6. Persist to database.json on the server disk
+  saveDatabase();
+
+  console.log(`[USER DELETED] Account '${targetUsername}' was deleted by admin.`);
+
+  res.json({
+    success: true,
+    message: `Ο λογαριασμός '${targetUsername}' και όλα τα σχετικά δεδομένα διαγράφηκαν επιτυχώς.`
+  });
+};
+
+app.delete("/api/admin/users/:username", deleteUserAccountHandler);
+app.post("/api/admin/users/delete", deleteUserAccountHandler);
 
 // Admin License Key Management Routes
 app.get("/api/admin/licenses", (req, res) => {
