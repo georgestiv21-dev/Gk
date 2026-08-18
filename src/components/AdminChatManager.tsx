@@ -34,9 +34,20 @@ export default function AdminChatManager({ adminKey }: AdminChatManagerProps) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const isFetchingRef = useRef<boolean>(false);
+
   const fetchChats = async () => {
+    if (isFetchingRef.current) return;
+    // Don't poll aggressively if document tab is hidden
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+
+    isFetchingRef.current = true;
     try {
-      const res = await axios.get(`/api/admin/chats?adminKey=${encodeURIComponent(adminKey)}`);
+      const res = await axios.get(`/api/admin/chats?adminKey=${encodeURIComponent(adminKey)}`, {
+        headers: {
+          "x-admin-key": adminKey
+        }
+      });
       setChats(res.data.chats || []);
       if (!selectedSessionId && res.data.chats?.length > 0) {
         setSelectedSessionId(res.data.chats[0].sessionId);
@@ -44,13 +55,14 @@ export default function AdminChatManager({ adminKey }: AdminChatManagerProps) {
     } catch (err) {
       console.error("Error fetching admin chats:", err);
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchChats();
-    const interval = setInterval(fetchChats, 4000);
+    const interval = setInterval(fetchChats, 8000);
     return () => clearInterval(interval);
   }, [adminKey]);
 

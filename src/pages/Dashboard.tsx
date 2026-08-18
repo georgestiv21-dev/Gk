@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import { LogOut, PlayCircle, Plus, UploadCloud, Home, Search, User, ArrowLeft, Settings, X, Search as SearchIcon, Shield, Download, CheckCircle2, Film, Sparkles, Key, Tv, ListVideo, Copy, Trash2, RefreshCw, Clock, PlusCircle, ShieldCheck, Smartphone, Calendar, AlertCircle, MessageSquare } from "lucide-react";
+import { LogOut, PlayCircle, Plus, UploadCloud, Home, Search, User, ArrowLeft, Settings, X, Search as SearchIcon, Shield, Download, CheckCircle2, Film, Sparkles, Key, Tv, ListVideo, Copy, Trash2, RefreshCw, Clock, PlusCircle, ShieldCheck, Smartphone, Calendar, AlertCircle, MessageSquare, Edit3, Sliders, Pencil, Eye, Check, ChevronDown } from "lucide-react";
 import type { Video } from "../types";
 import Logo from "../components/Logo";
 import AppBar from "../components/AppBar";
@@ -9,6 +9,12 @@ import FloatingNavBar from "../components/FloatingNavBar";
 import UserPendingChatView from "../components/UserPendingChatView";
 import AdminChatManager from "../components/AdminChatManager";
 import UserProfileDevices from "../components/UserProfileDevices";
+import LiveEditModal from "../components/LiveEditModal";
+
+export const cleanTitle = (rawTitle?: string) => {
+  if (!rawTitle) return "";
+  return rawTitle.replace(/\s*[\(\[]\s*\d{4}\s*[\)\]]\s*$/, "").trim();
+};
 
 export default function Dashboard() {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -19,12 +25,77 @@ export default function Dashboard() {
   const [typeFilter, setTypeFilter] = useState<"all" | "series" | "movie">("all");
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [userStatus, setUserStatus] = useState<"active" | "pending">("pending");
+  const [userLibraryAccess, setUserLibraryAccess] = useState<"gctunes" | "greek_streaming" | "both">(
+    (localStorage.getItem("libraryAccess") as any) || "both"
+  );
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "gctunes" | "greek_streaming">("all");
+  const [yearFilter, setYearFilter] = useState<string>("all");
+  const [isYearPickerOpen, setIsYearPickerOpen] = useState<boolean>(false);
   const [securityWarning, setSecurityWarning] = useState<string | null>(null);
+  
+  // Live In-Place Visual Editor State
+  const [liveEditMode, setLiveEditMode] = useState<boolean>(
+    () => localStorage.getItem("liveEditMode") === "true"
+  );
+  const [editingVideo, setEditingVideo] = useState<Video | null>(null);
+
   const navigate = useNavigate();
 
   const isAdmin = localStorage.getItem("isAdmin") === "true";
   const licenseKey = localStorage.getItem("licenseKey") || "";
   const username = localStorage.getItem("username") || "";
+
+  const toggleLiveEditMode = (val?: boolean) => {
+    const nextVal = typeof val === "boolean" ? val : !liveEditMode;
+    setLiveEditMode(nextVal);
+    localStorage.setItem("liveEditMode", String(nextVal));
+  };
+
+  const handleSaveVideo = async (updatedVideo: Video): Promise<boolean> => {
+    try {
+      const res = await axios.put(`/api/videos/${updatedVideo.id}`, {
+        ...updatedVideo,
+        licenseKey,
+        adminKey: licenseKey
+      }, {
+        headers: { "x-admin-key": licenseKey }
+      });
+
+      if (res.data.success) {
+        const saved = res.data.video || updatedVideo;
+        setVideos(prev => prev.map(v => v.id === saved.id ? saved : v));
+        if (selectedVideo?.id === saved.id) {
+          setSelectedVideo(saved);
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error("Save video error:", err);
+      return false;
+    }
+  };
+
+  const handleDeleteVideo = async (videoId: string): Promise<boolean> => {
+    try {
+      const res = await axios.delete(`/api/videos/${videoId}`, {
+        headers: { "x-admin-key": licenseKey },
+        params: { adminKey: licenseKey }
+      });
+
+      if (res.data.success) {
+        setVideos(prev => prev.filter(v => v.id !== videoId));
+        if (selectedVideo?.id === videoId) {
+          setSelectedVideo(null);
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error("Delete video error:", err);
+      return false;
+    }
+  };
 
   useEffect(() => {
     if (!licenseKey && !username) {
@@ -41,10 +112,14 @@ export default function Dashboard() {
       return devId;
     };
 
-    // Check account activation status
+    // Check account activation status & library access
     axios.post("/api/user-status", { username, licenseKey, deviceId: getDeviceId() })
       .then(res => {
         const isUserAdmin = Boolean(res.data.isAdmin);
+        if (res.data.libraryAccess) {
+          setUserLibraryAccess(res.data.libraryAccess);
+          localStorage.setItem("libraryAccess", res.data.libraryAccess);
+        }
         if (isUserAdmin) {
           localStorage.setItem("isAdmin", "true");
           localStorage.setItem("isReadOnlyAdmin", res.data.isReadOnlyAdmin ? "true" : "false");
@@ -126,19 +201,70 @@ export default function Dashboard() {
   const handleLogout = () => {
     localStorage.removeItem("licenseKey");
     localStorage.removeItem("isAdmin");
+    localStorage.removeItem("libraryAccess");
     navigate("/login");
   };
 
-  const displayedVideos = videos
+  // Check if a specific video is allowed for the active user's permissions & category filter
+  const isVideoAccessible = (v: Video) => {
+    // 1. User permission check
+    if (!isAdmin) {
+      if (userLibraryAccess === "gctunes" && v.category === "greek_streaming") {
+        return false;
+      }
+      if (userLibraryAccess === "greek_streaming" && (v.category === "gctunes" || (!v.category && v.type !== "movie"))) {
+        return false;
+      }
+    }
+
+    // 2. Active category tab filter check (if user has both access or is admin)
+    if (isAdmin || userLibraryAccess === "both") {
+      if (categoryFilter === "gctunes") {
+        return v.category === "gctunes" || !v.category;
+      }
+      if (categoryFilter === "greek_streaming") {
+        return v.category === "greek_streaming";
+      }
+    }
+
+    return true;
+  };
+
+  // Base accessible videos matching active category & type tab
+  const baseCategoryVideos = videos
+    .filter(isVideoAccessible)
     .filter((v) => {
       if (typeFilter === "series") return v.type === "series";
       if (typeFilter === "movie") return v.type === "movie";
       return true;
+    });
+
+  // Dynamically extract all available years ONLY present in this category/subset
+  const availableYears = Array.from(
+    new Set(
+      baseCategoryVideos
+        .map((v) => (v.year ? String(v.year).trim() : ""))
+        .filter((y) => /^\d{4}$/.test(y))
+    )
+  ).sort((a, b) => Number(b) - Number(a));
+
+  // Reset year filter to 'all' if active year doesn't exist in current category
+  useEffect(() => {
+    if (yearFilter !== "all" && !availableYears.includes(yearFilter)) {
+      setYearFilter("all");
+    }
+  }, [categoryFilter, typeFilter, availableYears, yearFilter]);
+
+  const displayedVideos = baseCategoryVideos
+    .filter((v) => {
+      if (yearFilter === "all") return true;
+      return String(v.year || "").trim() === yearFilter;
     })
     .reverse();
 
   const filteredVideos = videos
-    .filter(v => v.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    .filter(isVideoAccessible)
+    .filter(v => cleanTitle(v.title).toLowerCase().includes(searchQuery.toLowerCase()) || v.title.toLowerCase().includes(searchQuery.toLowerCase()))
     .reverse();
 
   if (loading) {
@@ -208,9 +334,215 @@ export default function Dashboard() {
           <TitleDetails
             video={selectedVideo}
             onClose={() => setSelectedVideo(null)}
+            isAdmin={isAdmin}
+            liveEditMode={liveEditMode}
+            onEditVideo={(v) => setEditingVideo(v)}
           />
         ) : activeTab === "home" ? (
-          <div className="space-y-8 animate-in fade-in duration-300">
+          <div className="space-y-6 animate-in fade-in duration-300">
+            {/* Library Category Filter Banner / Pills with Dynamic Top-Right Year Popover */}
+            {(isAdmin || userLibraryAccess === "both") ? (
+              <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-2xl bg-panel/40 border border-white/5 backdrop-blur-md relative z-50">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 bg-dark/80 p-0.5 rounded-xl border border-white/5">
+                    <button
+                      type="button"
+                      onClick={() => setCategoryFilter("all")}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                        categoryFilter === "all"
+                          ? "bg-primary text-white shadow-sm shadow-primary/30"
+                          : "text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      <span className="text-[10px]">✨</span>
+                      <span>Όλα</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCategoryFilter("gctunes")}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                        categoryFilter === "gctunes"
+                          ? "bg-amber-500/90 text-black shadow-sm shadow-amber-500/20"
+                          : "text-gray-400 hover:text-amber-300"
+                      }`}
+                    >
+                      <span className="text-[10px]">🧸</span>
+                      <span>GC</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCategoryFilter("greek_streaming")}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                        categoryFilter === "greek_streaming"
+                          ? "bg-cyan-500/90 text-black shadow-sm shadow-cyan-500/20"
+                          : "text-gray-400 hover:text-cyan-300"
+                      }`}
+                    >
+                      <span className="text-[10px]">🎬</span>
+                      <span>GS</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Top-Right Rectangular Slide/Scroll Year Picker */}
+                {availableYears.length > 0 && (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsYearPickerOpen(!isYearPickerOpen)}
+                      className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                        yearFilter !== "all"
+                          ? "bg-primary text-white border-primary shadow-primary/30"
+                          : "bg-dark/90 hover:bg-dark text-gray-200 hover:text-white border-gray-800"
+                      }`}
+                      title="Επιλογή Έτους"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>{yearFilter === "all" ? "Όλα τα έτη" : yearFilter}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isYearPickerOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {/* Pop-up Rectangular Box in front of posters */}
+                    {isYearPickerOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-[105]"
+                          onClick={() => setIsYearPickerOpen(false)}
+                        />
+                        <div className="absolute right-0 top-full mt-2 w-52 sm:w-60 bg-[#0f1117] border border-gray-700/80 rounded-2xl shadow-2xl z-[110] p-2.5 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10">
+                          <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-white/10 mb-1.5 text-[11px] font-black text-gray-400">
+                            <span>Χρονολογία</span>
+                            <span className="text-[10px] font-mono text-primary font-bold">
+                              {yearFilter === "all" ? "Όλα" : yearFilter}
+                            </span>
+                          </div>
+
+                          {/* Scrollable / Slide list up and down */}
+                          <div className="max-h-60 sm:max-h-72 overflow-y-auto space-y-1 pr-1 overscroll-contain scrollbar-thin">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setYearFilter("all");
+                                setIsYearPickerOpen(false);
+                              }}
+                              className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold text-left transition-all flex items-center justify-between cursor-pointer ${
+                                yearFilter === "all"
+                                  ? "bg-primary text-white shadow-sm shadow-primary/30"
+                                  : "text-gray-300 hover:bg-white/10 hover:text-white"
+                              }`}
+                            >
+                              <span>📅 Όλα τα έτη</span>
+                              {yearFilter === "all" && <Check className="w-3.5 h-3.5 text-white" />}
+                            </button>
+
+                            {availableYears.map((yr) => (
+                              <button
+                                key={yr}
+                                type="button"
+                                onClick={() => {
+                                  setYearFilter(yr);
+                                  setIsYearPickerOpen(false);
+                                }}
+                                className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold text-left transition-all flex items-center justify-between cursor-pointer ${
+                                  yearFilter === yr
+                                    ? "bg-primary text-white shadow-sm shadow-primary/30"
+                                    : "text-gray-300 hover:bg-white/10 hover:text-white"
+                                }`}
+                              >
+                                <span>{yr}</span>
+                                {yearFilter === yr && <Check className="w-3.5 h-3.5 text-white" />}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between bg-panel/30 px-3 py-1.5 rounded-2xl border border-white/5 relative z-50">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs">{userLibraryAccess === "gctunes" ? "🧸" : "🎬"}</span>
+                  <span className="text-[11px] font-black text-gray-300">
+                    {userLibraryAccess === "gctunes" ? "GC (Greek Cartoons)" : "GS (Greek Streaming)"}
+                  </span>
+                </div>
+                {availableYears.length > 0 && (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsYearPickerOpen(!isYearPickerOpen)}
+                      className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                        yearFilter !== "all"
+                          ? "bg-primary text-white border-primary shadow-primary/30"
+                          : "bg-dark/90 hover:bg-dark text-gray-200 hover:text-white border-gray-800"
+                      }`}
+                      title="Επιλογή Έτους"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>{yearFilter === "all" ? "Όλα τα έτη" : yearFilter}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isYearPickerOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {isYearPickerOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-[105]"
+                          onClick={() => setIsYearPickerOpen(false)}
+                        />
+                        <div className="absolute right-0 top-full mt-2 w-52 sm:w-60 bg-[#0f1117] border border-gray-700/80 rounded-2xl shadow-2xl z-[110] p-2.5 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10">
+                          <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-white/10 mb-1.5 text-[11px] font-black text-gray-400">
+                            <span>Χρονολογία</span>
+                            <span className="text-[10px] font-mono text-primary font-bold">
+                              {yearFilter === "all" ? "Όλα" : yearFilter}
+                            </span>
+                          </div>
+
+                          <div className="max-h-60 sm:max-h-72 overflow-y-auto space-y-1 pr-1 overscroll-contain scrollbar-thin">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setYearFilter("all");
+                                setIsYearPickerOpen(false);
+                              }}
+                              className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold text-left transition-all flex items-center justify-between cursor-pointer ${
+                                yearFilter === "all"
+                                  ? "bg-primary text-white shadow-sm shadow-primary/30"
+                                  : "text-gray-300 hover:bg-white/10 hover:text-white"
+                              }`}
+                            >
+                              <span>📅 Όλα τα έτη</span>
+                              {yearFilter === "all" && <Check className="w-3.5 h-3.5 text-white" />}
+                            </button>
+
+                            {availableYears.map((yr) => (
+                              <button
+                                key={yr}
+                                type="button"
+                                onClick={() => {
+                                  setYearFilter(yr);
+                                  setIsYearPickerOpen(false);
+                                }}
+                                className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold text-left transition-all flex items-center justify-between cursor-pointer ${
+                                  yearFilter === yr
+                                    ? "bg-primary text-white shadow-sm shadow-primary/30"
+                                    : "text-gray-300 hover:bg-white/10 hover:text-white"
+                                }`}
+                              >
+                                <span>{yr}</span>
+                                {yearFilter === yr && <Check className="w-3.5 h-3.5 text-white" />}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div>
               {/* Grid of Videos */}
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6">
@@ -218,25 +550,60 @@ export default function Dashboard() {
                   <div
                     key={video.id}
                     onClick={() => setSelectedVideo(video)}
-                    className="group cursor-pointer flex flex-col gap-2"
+                    className="group cursor-pointer flex flex-col gap-2 relative"
                   >
-                    <div className="relative aspect-[2/3] bg-dark rounded-2xl overflow-hidden border border-gray-800/80 group-hover:border-primary/50 transition-all duration-300 shadow-xl group-hover:shadow-primary/10">
+                    <div className={`relative aspect-[2/3] bg-dark rounded-2xl overflow-hidden border transition-all duration-300 shadow-xl ${
+                      isAdmin && liveEditMode 
+                        ? 'border-primary/80 ring-2 ring-primary/30 shadow-primary/20' 
+                        : 'border-gray-800/80 group-hover:border-primary/50 group-hover:shadow-primary/10'
+                    }`}>
                       <img
                         src={video.thumbnail || "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=800&auto=format&fit=crop"}
-                        alt={video.title}
+                        alt={cleanTitle(video.title)}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
                       <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-xs">
                         <PlayCircle className="w-12 h-12 text-white drop-shadow-xl transform group-hover:scale-110 transition-transform" />
                       </div>
+                      
                       <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/10 text-[10px] font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
                         <span>{video.type === "movie" ? "Ταινία" : "Σειρά"}</span>
                         {video.year && <span className="text-gray-300">• {video.year}</span>}
                       </div>
+
+                      {/* Category Badge if both libraries accessible */}
+                      {(isAdmin || userLibraryAccess === "both") && video.category && (
+                        <div className="absolute top-3 right-3 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/10 text-[9px] font-black uppercase tracking-wider">
+                          {video.category === "greek_streaming" ? (
+                            <span className="text-cyan-300 font-bold">GS</span>
+                          ) : (
+                            <span className="text-amber-300 font-bold">GC</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Live Edit Mode In-Place Button Overlay */}
+                      {isAdmin && liveEditMode && (
+                        <div 
+                          className="absolute inset-x-2 bottom-12 z-20 flex items-center justify-center gap-1.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setEditingVideo(video)}
+                            className="px-3 py-1.5 rounded-xl bg-primary text-white text-[11px] font-black shadow-lg shadow-primary/40 flex items-center gap-1.5 hover:scale-105 active:scale-95 transition-all cursor-pointer border border-white/20"
+                            title="Επεξεργασία UI & Poster"
+                          >
+                            <Pencil className="w-3 h-3" />
+                            <span>Επεξεργασία</span>
+                          </button>
+                        </div>
+                      )}
+
                       <div className="absolute bottom-3 left-3 right-3">
                         <h3 className="text-xs sm:text-sm font-bold text-white leading-tight drop-shadow-md">
-                          {video.title} {video.year ? `(${video.year})` : ""}
+                          {cleanTitle(video.title)}
                         </h3>
                       </div>
                     </div>
@@ -270,12 +637,16 @@ export default function Dashboard() {
                 <div
                   key={video.id}
                   onClick={() => setSelectedVideo(video)}
-                  className="group cursor-pointer flex flex-col gap-2"
+                  className="group cursor-pointer flex flex-col gap-2 relative"
                 >
-                  <div className="relative aspect-[2/3] bg-dark rounded-2xl overflow-hidden border border-gray-800 group-hover:border-primary/50 transition-all duration-300 shadow-xl">
+                  <div className={`relative aspect-[2/3] bg-dark rounded-2xl overflow-hidden border transition-all duration-300 shadow-xl ${
+                    isAdmin && liveEditMode 
+                      ? 'border-primary/80 ring-2 ring-primary/30 shadow-primary/20' 
+                      : 'border-gray-800 group-hover:border-primary/50'
+                  }`}>
                     <img
                       src={video.thumbnail || "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=800&auto=format&fit=crop"}
-                      alt={video.title}
+                      alt={cleanTitle(video.title)}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
@@ -286,9 +657,39 @@ export default function Dashboard() {
                       <span>{video.type === "movie" ? "Ταινία" : "Σειρά"}</span>
                       {video.year && <span className="text-gray-300">• {video.year}</span>}
                     </div>
+
+                    {/* Category Badge if both libraries accessible */}
+                    {(isAdmin || userLibraryAccess === "both") && video.category && (
+                      <div className="absolute top-3 right-3 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/10 text-[9px] font-black uppercase tracking-wider">
+                        {video.category === "greek_streaming" ? (
+                          <span className="text-cyan-300 font-bold">GS</span>
+                        ) : (
+                          <span className="text-amber-300 font-bold">GC</span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Live Edit Mode In-Place Button Overlay */}
+                    {isAdmin && liveEditMode && (
+                      <div 
+                        className="absolute inset-x-2 bottom-12 z-20 flex items-center justify-center gap-1.5"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setEditingVideo(video)}
+                          className="px-3 py-1.5 rounded-xl bg-primary text-white text-[11px] font-black shadow-lg shadow-primary/40 flex items-center gap-1.5 hover:scale-105 active:scale-95 transition-all cursor-pointer border border-white/20"
+                          title="Επεξεργασία UI & Poster"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          <span>Επεξεργασία</span>
+                        </button>
+                      </div>
+                    )}
+
                     <div className="absolute bottom-3 left-3 right-3">
                       <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-2 leading-tight">
-                        {video.title} {video.year ? `(${video.year})` : ""}
+                        {cleanTitle(video.title)}
                       </h3>
                     </div>
                   </div>
@@ -305,17 +706,33 @@ export default function Dashboard() {
         ) : activeTab === "profile" ? (
           <div className="max-w-4xl mx-auto py-6 space-y-6 animate-in fade-in duration-300">
             {isAdmin ? (
-              <AdminPanel onVideoAdded={(v) => {
-                setVideos(prev => {
-                  const exists = prev.findIndex(pv => pv.id === v.id);
-                  if (exists !== -1) {
-                    const newVideos = [...prev];
-                    newVideos[exists] = v;
-                    return newVideos;
-                  }
-                  return [v, ...prev];
-                });
-              }} />
+              <AdminPanel 
+                liveEditMode={liveEditMode}
+                onToggleLiveEditMode={toggleLiveEditMode}
+                onNavigateHome={() => {
+                  setActiveTab("home");
+                  setSelectedVideo(null);
+                }}
+                onVideoAdded={(v) => {
+                  setVideos(prev => {
+                    const exists = prev.findIndex(pv => pv.id === v.id);
+                    if (exists !== -1) {
+                      const newVideos = [...prev];
+                      newVideos[exists] = v;
+                      return newVideos;
+                    }
+                    return [v, ...prev];
+                  });
+                }}
+                onRefreshVideos={() => {
+                  axios.get("/api/videos")
+                    .then(res => {
+                      const sorted = res.data.sort((a: Video, b: Video) => a.title.localeCompare(b.title, 'el', { sensitivity: 'base' }));
+                      setVideos(sorted);
+                    })
+                    .catch(err => console.error(err));
+                }}
+              />
             ) : (
               <UserProfileDevices
                 username={username}
@@ -347,12 +764,33 @@ export default function Dashboard() {
           }}
         />
       )}
+
+      {/* Live In-Place Edit Modal */}
+      <LiveEditModal
+        video={editingVideo}
+        isOpen={Boolean(editingVideo)}
+        onClose={() => setEditingVideo(null)}
+        onSave={handleSaveVideo}
+        onDelete={handleDeleteVideo}
+      />
     </div>
   );
 }
 
 // --- Detail View Component ---
-function TitleDetails({ video, onClose }: { video: Video; onClose: () => void }) {
+function TitleDetails({ 
+  video, 
+  onClose,
+  isAdmin = false,
+  liveEditMode = false,
+  onEditVideo
+}: { 
+  video: Video; 
+  onClose: () => void;
+  isAdmin?: boolean;
+  liveEditMode?: boolean;
+  onEditVideo?: (v: Video) => void;
+}) {
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -361,100 +799,152 @@ function TitleDetails({ video, onClose }: { video: Video; onClose: () => void })
   };
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 pb-10 space-y-6">
-      <button
-        onClick={onClose}
-        className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-sm font-bold bg-panel px-4 py-2 rounded-xl border border-gray-800 cursor-pointer"
-      >
-        <ArrowLeft className="w-4 h-4" /> Πίσω στο Κατάλογο
-      </button>
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 pb-10 space-y-4 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between gap-4">
+        <button
+          onClick={onClose}
+          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors text-xs sm:text-sm font-bold bg-panel px-3.5 py-2 rounded-xl border border-gray-800 cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" /> Πίσω στο Κατάλογο
+        </button>
 
-      {/* Hero Header Banner (Clickable to start playback) */}
-      <div 
-        onClick={() => handlePlay(1)}
-        className="relative aspect-video sm:aspect-[21/9] rounded-3xl overflow-hidden border border-gray-800 shadow-2xl bg-dark group cursor-pointer"
-      >
-        <img
-          src={video.thumbnail || "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=800&auto=format&fit=crop"}
-          alt={video.title}
-          className="w-full h-full object-cover opacity-60 group-hover:opacity-50 transition-opacity duration-700"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-darker via-darker/60 to-transparent"></div>
+        {/* In-Place Visual Edit Action Button for Admins */}
+        {isAdmin && liveEditMode && onEditVideo && (
+          <button
+            onClick={() => onEditVideo(video)}
+            className="flex items-center gap-2 text-white bg-gradient-to-r from-primary to-orange-500 hover:opacity-90 transition-all text-xs font-black px-3.5 py-2 rounded-xl shadow-lg shadow-primary/25 cursor-pointer"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+            <span>Επεξεργασία</span>
+          </button>
+        )}
+      </div>
 
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30 backdrop-blur-xs">
-          <PlayCircle className="w-16 h-16 text-white drop-shadow-2xl transform group-hover:scale-110 transition-transform" />
+      {/* Unified Header Card with Large Backdrop extending behind title & description */}
+      <div className={`relative rounded-2xl sm:rounded-3xl overflow-hidden border border-gray-800 shadow-2xl bg-dark flex flex-col justify-end transition-all duration-300 ${
+        isExpanded ? "min-h-[460px] sm:min-h-[540px]" : "min-h-[360px] sm:min-h-[440px]"
+      }`}>
+        {/* Background Backdrop Image with fade only at the bottom half */}
+        <div className="absolute inset-0 w-full h-full pointer-events-none">
+          <img
+            src={video.backdrop || video.thumbnail || "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=800&auto=format&fit=crop"}
+            alt={cleanTitle(video.title)}
+            className="w-full h-full object-cover opacity-90 transition-transform duration-500"
+          />
+          {/* Top is clear, fade smoothly appears on the lower half behind texts */}
+          <div className="absolute inset-0 bg-gradient-to-t from-darker via-darker/90 via-40% to-transparent"></div>
         </div>
 
-        <div className="absolute bottom-0 left-0 p-6 sm:p-10 w-full" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center gap-2 mb-3">
-            <span className="bg-primary/20 text-primary text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-primary/30">
-              {video.type === "movie" ? "Ταινία" : "Σειρά"}
-            </span>
-            {video.year && (
-              <span className="bg-gray-800/90 text-gray-200 text-xs font-bold px-3 py-1 rounded-full border border-gray-700/80">
-                {video.year}
+        {/* Content pinned to the lower part over the subtle fade */}
+        <div className="relative z-10 p-5 sm:p-7 space-y-2.5">
+          {/* Category GC/GS and Type with Release Year placed DIRECTLY above the title */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Category Badge (GC / GS) */}
+            {video.category && (
+              <span className="bg-black/80 backdrop-blur-md text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg border border-white/15 shadow-md">
+                {video.category === "greek_streaming" ? (
+                  <span className="text-cyan-300">GS</span>
+                ) : (
+                  <span className="text-amber-300">GC</span>
+                )}
               </span>
             )}
-          </div>
-          
-          {/* Full Title (Olokliros Titlos) */}
-          <h1 className="text-2xl sm:text-4xl font-black text-white mb-3 tracking-tight drop-shadow-lg leading-tight">
-            {video.title} {video.year ? `(${video.year})` : ""}
-          </h1>
 
-          {/* Expandable Scrollable Description Container */}
-          <div className="space-y-2 max-w-3xl" onClick={(e) => e.stopPropagation()}>
-            <div
-              className={`text-gray-100 text-xs sm:text-sm leading-relaxed transition-all ${
-                isExpanded
-                  ? 'max-h-56 overflow-y-auto pr-3 p-4 bg-black/80 backdrop-blur-xl rounded-2xl border border-white/20 shadow-2xl cursor-text'
-                  : 'line-clamp-2 sm:line-clamp-3 drop-shadow-md'
-              }`}
-            >
-              {video.description}
-            </div>
-            {video.description && video.description.length > 80 && (
+            {/* Type & Year directly next to each other (e.g. "Σειρά • 2005" or "Ταινία • 2021") */}
+            <span className="bg-primary/90 text-white text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg shadow-md flex items-center gap-1.5">
+              <span>{video.type === "movie" ? "Ταινία" : "Σειρά"}</span>
+              {video.year && <span className="text-white/90">• {video.year}</span>}
+            </span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-white tracking-tight drop-shadow-md leading-tight">
+              {cleanTitle(video.title)}
+            </h1>
+
+            {/* Play Button ONLY for Movies */}
+            {video.type === "movie" && (
               <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsExpanded(!isExpanded);
-                }}
-                className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-1 cursor-pointer bg-black/80 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-primary/40 shadow-lg"
+                onClick={() => handlePlay(1)}
+                className="px-5 py-2.5 bg-primary hover:bg-primary-dark text-white text-xs sm:text-sm font-bold rounded-xl transition-all shadow-lg shadow-primary/25 flex items-center justify-center gap-2 cursor-pointer shrink-0 self-start sm:self-auto"
               >
-                {isExpanded ? "Σύμπτυξη ▲" : "Περισσότερα (Σκρολ) ▼"}
+                <PlayCircle className="w-4 h-4" />
+                <span>Αναπαραγωγή Τώρα</span>
               </button>
             )}
           </div>
+
+          {/* Simple Clean Description with compact toggle */}
+          {video.description && (
+            <div className="space-y-1.5 max-w-4xl">
+              <p className={`text-gray-200 text-xs sm:text-sm leading-relaxed drop-shadow-sm ${
+                isExpanded ? "" : "line-clamp-2"
+              }`}>
+                {video.description}
+              </p>
+
+              {video.description.length > 90 && (
+                <button
+                  type="button"
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  className="text-[11px] font-bold text-gray-400 hover:text-white transition-colors inline-flex items-center gap-1 cursor-pointer bg-dark/60 hover:bg-dark px-2.5 py-1 rounded-lg border border-gray-800"
+                >
+                  {isExpanded ? "▲ Λιγότερα" : "▼ Περισσότερα..."}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Episode / Details List */}
-      {video.type === "series" && video.episodes && video.episodes.length > 0 ? (
-        <div className="space-y-4">
-          <h3 className="text-xl font-bold">Επεισόδια ({video.episodes.length})</h3>
-          <div className="grid gap-3">
+      {/* Episode / Details List (Clean without descriptions) */}
+      {video.type === "series" && video.episodes && video.episodes.length > 0 && (
+        <div className="space-y-3 pt-1">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base sm:text-lg font-bold text-white">Επεισόδια ({video.episodes.length})</h3>
+            {isAdmin && liveEditMode && onEditVideo && (
+              <button
+                type="button"
+                onClick={() => onEditVideo(video)}
+                className="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                <span>Διαχείριση Επεισοδίων</span>
+              </button>
+            )}
+          </div>
+
+          <div className="grid gap-2 sm:gap-2.5">
             {video.episodes.map((ep) => (
               <div
                 key={ep.id}
                 onClick={() => handlePlay(ep.episodeNumber)}
-                className="flex items-center gap-4 p-3 rounded-2xl bg-panel hover:bg-gray-800/80 border border-gray-800/80 transition-all cursor-pointer group"
+                className="flex items-center gap-3 sm:gap-4 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-panel hover:bg-gray-800/90 border border-gray-800 hover:border-primary/40 transition-all cursor-pointer group"
               >
-                <div className="relative w-32 sm:w-40 aspect-video bg-gray-900 rounded-xl overflow-hidden shrink-0">
-                  <img src={ep.thumbnail || "https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?q=80&w=800&auto=format&fit=crop"} alt={ep.title} className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity" />
+                <div className="relative w-24 sm:w-32 aspect-video bg-gray-900 rounded-lg overflow-hidden shrink-0 border border-gray-800">
+                  <img 
+                    src={ep.thumbnail || video.thumbnail || "https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?q=80&w=800&auto=format&fit=crop"} 
+                    alt={ep.title} 
+                    className="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition-opacity" 
+                  />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <PlayCircle className="w-8 h-8 text-white" />
+                    <PlayCircle className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
                   </div>
                 </div>
-                <div className="flex-1">
-                  <h4 className="font-bold text-white group-hover:text-primary transition-colors text-sm sm:text-base">{ep.title}</h4>
-                  <p className="text-xs sm:text-sm text-gray-400 mt-1 line-clamp-2">{ep.description}</p>
+                <div className="flex-1 min-w-0 flex items-center justify-between gap-3">
+                  <h4 className="font-bold text-white group-hover:text-primary transition-colors text-xs sm:text-sm truncate">
+                    {ep.title}
+                  </h4>
+                  <span className="text-gray-400 group-hover:text-primary transition-colors shrink-0 text-xs font-bold flex items-center gap-1">
+                    <PlayCircle className="w-4 h-4" />
+                    <span className="hidden sm:inline">Αναπαραγωγή</span>
+                  </span>
                 </div>
               </div>
             ))}
           </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -483,35 +973,107 @@ interface UserAccountItem {
   daysRemaining: number;
   renewalsCount?: number;
   isAdmin: boolean;
+  libraryAccess?: "gctunes" | "greek_streaming" | "both";
   screenRecordAlertsCount?: number;
   lastScreenRecordAlert?: number;
   screenRecordDetails?: string;
 }
 
-function AdminPanel({ onVideoAdded }: { onVideoAdded: (v: Video) => void }) {
+function AdminPanel({ 
+  onVideoAdded, 
+  onRefreshVideos,
+  liveEditMode = false,
+  onToggleLiveEditMode,
+  onNavigateHome
+}: { 
+  onVideoAdded: (v: Video) => void; 
+  onRefreshVideos?: () => void;
+  liveEditMode?: boolean;
+  onToggleLiveEditMode?: (val?: boolean) => void;
+  onNavigateHome?: () => void;
+}) {
   // User Accounts State
   const [users, setUsers] = useState<UserAccountItem[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userSearch, setUserSearch] = useState("");
   const [approvingUser, setApprovingUser] = useState<string | null>(null);
 
-  // Video Upload State
-  const [file, setFile] = useState<File | null>(null);
-  const [uploadLoading, setUploadLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [statusText, setStatusText] = useState("Επεξεργασία...");
+  // User Approval / Access Control Modal State
+  const [approvalModalUser, setApprovalModalUser] = useState<UserAccountItem | null>(null);
+  const [modalDays, setModalDays] = useState<number>(30);
+  const [modalLibraryAccess, setModalLibraryAccess] = useState<"gctunes" | "greek_streaming" | "both">("both");
+
+  // Storj Auto-Sync State (Zero AI)
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncResult, setSyncResult] = useState<{
+    scannedMediaFiles: number;
+    addedCount: number;
+    updatedCount: number;
+    totalCatalogVideos: number;
+    detectedItems?: Array<{
+      key: string;
+      title: string;
+      year?: string;
+      type: "series" | "movie";
+      category: "gctunes" | "greek_streaming";
+      categoryLabel: string;
+      episodeNumber?: number;
+      episodeTitle?: string;
+      thumbnail: string;
+      storageUrl: string;
+      status: "created" | "updated" | "already_indexed";
+      statusText: string;
+    }>;
+    log: string[];
+    message: string;
+  } | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const adminKey = localStorage.getItem("licenseKey") || "ADMIN-XMR-9999";
   const currentUsername = localStorage.getItem("username") || "";
   const isReadOnly = localStorage.getItem("isReadOnlyAdmin") === "true" || currentUsername.toLowerCase() === "adminvlassis";
 
-  const fetchUsers = async () => {
+  const handleStorjSync = async () => {
+    if (isReadOnly) return;
+    setSyncLoading(true);
+    setSyncResult(null);
+    setSyncError(null);
+    try {
+      const res = await axios.post("/api/admin/storj-sync", {
+        adminKey
+      }, {
+        headers: {
+          "x-admin-key": adminKey
+        }
+      });
+      setSyncResult(res.data);
+      if (onRefreshVideos) {
+        onRefreshVideos();
+      }
+    } catch (err: any) {
+      setSyncError(err.response?.data?.error || "Αποτυχία κατά τον αυτόματο συγχρονισμό του Storage.");
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  const fetchUsers = async (retryCount = 0) => {
     setLoadingUsers(true);
     try {
-      const res = await axios.get(`/api/admin/users?adminKey=${encodeURIComponent(adminKey)}`);
+      const res = await axios.get(`/api/admin/users?adminKey=${encodeURIComponent(adminKey)}`, {
+        headers: {
+          "x-admin-key": adminKey
+        }
+      });
       setUsers(res.data.users || []);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error fetching user accounts:", err);
+      // If rate-limited (429), retry automatically after short backoff up to 2 times
+      if (err.response?.status === 429 && retryCount < 2) {
+        setTimeout(() => {
+          fetchUsers(retryCount + 1);
+        }, 1500 * (retryCount + 1));
+      }
     } finally {
       setLoadingUsers(false);
     }
@@ -534,106 +1096,45 @@ function AdminPanel({ onVideoAdded }: { onVideoAdded: (v: Video) => void }) {
     }
   };
 
-  const handleApproveUser = async (username: string, days: number = 30) => {
-    if (isReadOnly) return;
-    if (!confirm(`Είστε σίγουρος ότι θέλετε να ορίσετε τη συνδρομή του χρήστη [${username}] σε ${days} ημέρες;`)) {
-      return;
-    }
-    setApprovingUser(username);
+  const openApprovalModal = (user: UserAccountItem) => {
+    setApprovalModalUser(user);
+    setModalDays(user.status === "pending" ? 30 : 30);
+    setModalLibraryAccess(user.libraryAccess || "both");
+  };
+
+  const handleApproveOrUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!approvalModalUser || isReadOnly) return;
+    const targetUsername = approvalModalUser.username;
+
+    setApprovingUser(targetUsername);
     try {
       await axios.post("/api/admin/users/approve", {
         adminKey,
-        username,
-        days
+        username: targetUsername,
+        days: modalDays,
+        libraryAccess: modalLibraryAccess
       });
-      alert(`🎉 Η συνδρομή του χρήστη '${username}' ορίστηκε επιτυχώς σε ${days} ημέρες!`);
+      setApprovalModalUser(null);
       fetchUsers();
     } catch (err: any) {
-      alert(err.response?.data?.error || "Σφάλμα κατά την έγκριση.");
+      alert(err.response?.data?.error || "Σφάλμα κατά την έγκριση / ενημέρωση.");
     } finally {
       setApprovingUser(null);
     }
   };
 
-  const handleUploadSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdateUserAccessQuick = async (username: string, libraryAccess: "gctunes" | "greek_streaming" | "both") => {
     if (isReadOnly) return;
-    if (!file) {
-      alert("Επιλέξτε ένα αρχείο βίντεο.");
-      return;
-    }
-
-    const parsed = parseFilename(file.name);
-
-    setUploadLoading(true);
-    setProgress(0);
-    setStatusText("Μεταφόρτωση & Μετατροπή HLS στο παρασκήνιο (Μην κλείσετε τη σελίδα)...");
-
-    // Start a fake progress for UI feel while waiting for the heavy ffmpeg task
-    const fakeInterval = setInterval(() => {
-      setProgress(p => (p < 85 ? p + 2 : p));
-    }, 1000);
-
     try {
-      // 1. Upload & Transcode via backend
-      const formData = new FormData();
-      formData.append("video", file);
-      
-      const uploadRes = await axios.post("/api/admin/videos/upload", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-          "x-admin-key": adminKey
-        }
+      await axios.post("/api/admin/users/update-access", {
+        adminKey,
+        username,
+        libraryAccess
       });
-
-      const hlsUrl = uploadRes.data.hlsUrl;
-      clearInterval(fakeInterval);
-      setProgress(90);
-      setStatusText("Αυτόματη ανάκτηση Metadata & Poster...");
-
-      // 2. Fetch AI Metadata & Poster using the parsed title
-      let fetchedDesc = "";
-      let fetchedThumb = "";
-      
-      try {
-        const aiRes = await axios.post("/api/admin/autofill", {
-          title: parsed.title,
-          adminKey
-        });
-        fetchedDesc = aiRes.data.description;
-        fetchedThumb = aiRes.data.thumbnail;
-      } catch (aiErr) {
-        console.error("AI auto-fill failed, proceeding without metadata", aiErr);
-      }
-
-      setProgress(98);
-      setStatusText("Αποθήκευση στη βάση δεδομένων...");
-
-      // 3. Save to database
-      const saveRes = await axios.post("/api/videos", {
-        licenseKey: adminKey,
-        title: parsed.title,
-        year: parsed.year,
-        type: parsed.type,
-        episodeNumber: parsed.episodeNumber,
-        url: hlsUrl,
-        description: fetchedDesc || "Αυτόματα ανεβασμένο βίντεο",
-        thumbnail: fetchedThumb || "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=800&auto=format&fit=crop"
-      });
-
-      setProgress(100);
-      setStatusText("Ολοκληρώθηκε!");
-      onVideoAdded(saveRes.data.video);
-      setFile(null);
-      setTimeout(() => {
-        setUploadLoading(false);
-      }, 1000);
-
+      fetchUsers();
     } catch (err: any) {
-      clearInterval(fakeInterval);
-      setUploadLoading(false);
-      console.error(err);
-      alert(err.response?.data?.error || "Αποτυχία ανεβάσματος βίντεο");
+      alert(err.response?.data?.error || "Σφάλμα κατά την ενημέρωση πρόσβασης.");
     }
   };
 
@@ -648,58 +1149,212 @@ function AdminPanel({ onVideoAdded }: { onVideoAdded: (v: Video) => void }) {
       <div className="text-right text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-2">
         Διαχειριστης: {currentUsername}
       </div>
-      {/* Top Card: Upload Video Form (Hidden for Read-Only Admin) */}
+
+      {/* Slim Admin Top Toolbar (Sync Button + Slim Pencil Toggle Switch) */}
       {!isReadOnly && (
-        <div className="bg-panel p-6 sm:p-8 rounded-3xl border border-gray-800 shadow-xl space-y-5">
-          <div className="flex items-center gap-3 pb-4 border-b border-gray-800">
-            <div className="w-10 h-10 bg-primary/20 text-primary border border-primary/30 rounded-xl flex items-center justify-center">
-              <UploadCloud className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-base font-black text-white">Προσθήκη Βίντεο / Σειράς</h3>
-              <p className="text-xs text-gray-400">Επιλέξτε αρχείο βίντεο &mdash; ο τίτλος και το poster ανακτώνται αυτόματα</p>
-            </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 py-1">
+          <button
+            type="button"
+            disabled={syncLoading}
+            onClick={handleStorjSync}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary to-orange-500 hover:opacity-90 active:scale-95 text-white font-bold text-xs sm:text-sm shadow-md shadow-primary/25 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {syncLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+            <span>{syncLoading ? "Συγχρονισμός..." : "Έναρξη Αυτόματου Συγχρονισμού"}</span>
+          </button>
+
+          {/* Slim Pencil & Compact Switch */}
+          <div className="flex items-center gap-2.5 bg-dark/80 border border-gray-800 px-3 py-1.5 rounded-xl">
+            <Pencil className={`w-4 h-4 transition-colors ${liveEditMode ? "text-primary" : "text-gray-400"}`} />
+            <button
+              type="button"
+              role="switch"
+              aria-checked={liveEditMode}
+              onClick={() => onToggleLiveEditMode && onToggleLiveEditMode(!liveEditMode)}
+              className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-200 ease-in-out cursor-pointer flex items-center shrink-0 ${
+                liveEditMode ? "bg-primary justify-end" : "bg-gray-700 justify-start"
+              }`}
+            >
+              <div className="w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform" />
+            </button>
           </div>
+        </div>
+      )}
 
-          <form onSubmit={handleUploadSubmit} className="space-y-4">
-            <div className="bg-dark p-6 rounded-2xl border border-gray-800 border-dashed text-center relative overflow-hidden group hover:border-primary/50 transition-colors cursor-pointer">
-              <input
-                required
-                type="file"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-              />
-              <UploadCloud className="w-8 h-8 text-gray-500 group-hover:text-primary transition-colors mx-auto mb-2" />
-              <p className="text-xs sm:text-sm font-extrabold text-white">
-                {file ? file.name : "Πατήστε εδώ ή σύρετε το αρχείο βίντεο (.mp4, .mkv, .m3u8)"}
-              </p>
-              <p className="text-[11px] text-gray-500 mt-1">Αυτόματη αναγνώριση τίτλου, σεζόν & επεισοδίου από το όνομα αρχείου</p>
+      {/* Sync Status Notifications (Only when active/complete) */}
+      {syncError && (
+        <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center gap-2 text-rose-300 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+          <span>{syncError}</span>
+        </div>
+      )}
+
+      {syncResult && (
+        <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+            <span>
+              {syncResult.addedCount > 0 || syncResult.updatedCount > 0
+                ? `Συγχρονίστηκαν ${syncResult.addedCount + syncResult.updatedCount} στοιχεία`
+                : "Ολοκληρώθηκε"}
+            </span>
+          </div>
+          <span className="font-mono text-gray-400 text-[11px]">{syncResult.totalCatalogVideos} τίτλοι στο UI</span>
+        </div>
+      )}
+
+      {/* User Approval / Library Access Management Modal */}
+      {approvalModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-panel border border-gray-800 w-full max-w-lg rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative">
+            <button
+              onClick={() => setApprovalModalUser(null)}
+              className="absolute top-5 right-5 p-2 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 transition-all cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 pb-4 border-b border-gray-800">
+              <div className="w-12 h-12 bg-primary/20 text-primary border border-primary/30 rounded-2xl flex items-center justify-center font-black text-lg">
+                {approvalModalUser.username.substring(0, 2).toUpperCase()}
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">
+                  Δικαιοδοσία & Έγκριση Χρήστη
+                </h3>
+                <p className="text-xs text-gray-400">
+                  Λογαριασμός: <span className="text-white font-bold">{approvalModalUser.username}</span> ({approvalModalUser.licenseKey})
+                </p>
+              </div>
             </div>
 
-            {uploadLoading && (
-              <div className="space-y-2 bg-dark p-4 rounded-xl border border-gray-800">
-                <div className="flex justify-between text-xs font-bold">
-                  <span className="text-primary">{statusText}</span>
-                  <span className="text-gray-400">{progress}%</span>
-                </div>
-                <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-                  <div
-                    className="bg-primary h-full transition-all duration-300 rounded-full"
-                    style={{ width: `${progress}%` }}
-                  />
+            <form onSubmit={handleApproveOrUpdateUser} className="space-y-5">
+              {/* Question: Greek Cartoons, Greek Streaming, or Both */}
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wider text-gray-300 flex items-center gap-1.5">
+                  <span>Επιλογή Βιβλιοθήκης Περιεχομένου:</span>
+                  <span className="text-primary">*</span>
+                </label>
+
+                <div className="grid grid-cols-1 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setModalLibraryAccess("gctunes")}
+                    className={`p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between gap-3 cursor-pointer ${
+                      modalLibraryAccess === "gctunes"
+                        ? "bg-amber-500/20 border-amber-500 text-white shadow-lg shadow-amber-500/10"
+                        : "bg-dark border-gray-800 text-gray-400 hover:border-gray-700 hover:text-gray-200"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl">🧸</span>
+                      <div>
+                        <div className="text-xs font-black text-white">Greek Cartoons (GC Tunes)</div>
+                        <div className="text-[11px] text-gray-400">Πρόσβαση αποκλειστικά στα αρχεία του φακέλου gctunes</div>
+                      </div>
+                    </div>
+                    {modalLibraryAccess === "gctunes" && (
+                      <CheckCircle2 className="w-5 h-5 text-amber-400 shrink-0" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setModalLibraryAccess("greek_streaming")}
+                    className={`p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between gap-3 cursor-pointer ${
+                      modalLibraryAccess === "greek_streaming"
+                        ? "bg-cyan-500/20 border-cyan-500 text-white shadow-lg shadow-cyan-500/10"
+                        : "bg-dark border-gray-800 text-gray-400 hover:border-gray-700 hover:text-gray-200"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl">🎬</span>
+                      <div>
+                        <div className="text-xs font-black text-white">Greek Streaming</div>
+                        <div className="text-[11px] text-gray-400">Πρόσβαση αποκλειστικά στα αρχεία του φακέλου Greek streaming</div>
+                      </div>
+                    </div>
+                    {modalLibraryAccess === "greek_streaming" && (
+                      <CheckCircle2 className="w-5 h-5 text-cyan-400 shrink-0" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setModalLibraryAccess("both")}
+                    className={`p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between gap-3 cursor-pointer ${
+                      modalLibraryAccess === "both"
+                        ? "bg-emerald-500/20 border-emerald-500 text-white shadow-lg shadow-emerald-500/10"
+                        : "bg-dark border-gray-800 text-gray-400 hover:border-gray-700 hover:text-gray-200"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl">🌟</span>
+                      <div>
+                        <div className="text-xs font-black text-white">Και τα δύο (Greek Cartoons & Greek Streaming)</div>
+                        <div className="text-[11px] text-gray-400">Πλήρης πρόσβαση σε όλο το περιεχόμενο και των δύο φακέλων</div>
+                      </div>
+                    </div>
+                    {modalLibraryAccess === "both" && (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    )}
+                  </button>
                 </div>
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={uploadLoading}
-              className="w-full py-3.5 bg-primary hover:bg-primary-dark font-black text-white text-xs sm:text-sm rounded-xl shadow-lg shadow-primary/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Ανέβασμα & Προσθήκη στον Κατάλογο</span>
-            </button>
-          </form>
+              {/* Days setting */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-gray-300">Ημέρες Συνδρομής</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[30, 60, 90, 365].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setModalDays(d)}
+                      className={`py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        modalDays === d
+                          ? "bg-primary text-white border-primary shadow-md shadow-primary/20"
+                          : "bg-dark border-gray-800 text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      {d} μέρες
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  min="1"
+                  max="3650"
+                  value={modalDays}
+                  onChange={(e) => setModalDays(parseInt(e.target.value, 10) || 30)}
+                  className="w-full bg-dark px-3.5 py-2.5 rounded-xl border border-gray-800 text-xs text-white focus:border-primary focus:outline-none mt-1"
+                />
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setApprovalModalUser(null)}
+                  className="px-4 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold transition-all cursor-pointer"
+                >
+                  Ακύρωση
+                </button>
+                <button
+                  type="submit"
+                  disabled={approvingUser === approvalModalUser.username}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black font-black text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {approvingUser === approvalModalUser.username ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 fill-black text-emerald-400" />
+                  )}
+                  <span>Αποθήκευση & Ενεργοποίηση</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -798,6 +1453,24 @@ function AdminPanel({ onVideoAdded }: { onVideoAdded: (v: Video) => void }) {
                               🛡️ ADMIN
                             </span>
                           )}
+
+                          {/* Library Tier Badge */}
+                          {u.libraryAccess === "gctunes" ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                              <span>🧸</span>
+                              <span>Greek Cartoons</span>
+                            </span>
+                          ) : u.libraryAccess === "greek_streaming" ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 flex items-center gap-1">
+                              <span>🎬</span>
+                              <span>Greek Streaming</span>
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                              <span>🌟</span>
+                              <span>Και τα δύο</span>
+                            </span>
+                          )}
                         </div>
 
                         <div className="text-xs mt-0.5 flex items-center gap-2">
@@ -815,31 +1488,68 @@ function AdminPanel({ onVideoAdded }: { onVideoAdded: (v: Video) => void }) {
                       </div>
                     </div>
 
-                    {/* Right: APPROVAL BUTTON FOR NEW ACCOUNTS (Hidden in Read-Only) */}
+                    {/* Right: APPROVAL / ACCESS CONFIG BUTTONS (Hidden in Read-Only) */}
                     {!u.isAdmin && !isReadOnly && (
-                      <div className="flex items-center gap-2 shrink-0">
-                        {isPending ? (
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                        {/* Quick Category switcher buttons */}
+                        <div className="hidden sm:flex items-center gap-1 bg-dark/80 p-1 rounded-xl border border-gray-800">
                           <button
-                            onClick={() => handleApproveUser(u.username, 30)}
-                            disabled={approvingUser === u.username}
-                            className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black font-extrabold text-xs rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer shrink-0"
+                            type="button"
+                            title="Ορισμός σε Greek Cartoons"
+                            onClick={() => handleUpdateUserAccessQuick(u.username, "gctunes")}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                              u.libraryAccess === "gctunes"
+                                ? "bg-amber-500 text-black shadow-xs"
+                                : "text-gray-400 hover:text-white"
+                            }`}
                           >
-                            {approvingUser === u.username ? (
-                              <RefreshCw className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <CheckCircle2 className="w-4 h-4 fill-black text-emerald-400" />
-                            )}
-                            <span>⚡ Έγκριση (30 Ημέρες)</span>
+                            🧸 GC
                           </button>
-                        ) : (
                           <button
-                            onClick={() => handleApproveUser(u.username, 30)}
-                            disabled={approvingUser === u.username}
-                            className="px-3.5 py-2 bg-gray-800 hover:bg-gray-700 text-emerald-400 font-bold text-xs rounded-xl transition-colors border border-gray-700 cursor-pointer flex items-center gap-1"
+                            type="button"
+                            title="Ορισμός σε Greek Streaming"
+                            onClick={() => handleUpdateUserAccessQuick(u.username, "greek_streaming")}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                              u.libraryAccess === "greek_streaming"
+                                ? "bg-cyan-500 text-black shadow-xs"
+                                : "text-gray-400 hover:text-white"
+                            }`}
                           >
-                            <span>+30 Μέρες</span>
+                            🎬 GS
                           </button>
-                        )}
+                          <button
+                            type="button"
+                            title="Ορισμός σε Και τα δύο"
+                            onClick={() => handleUpdateUserAccessQuick(u.username, "both")}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                              !u.libraryAccess || u.libraryAccess === "both"
+                                ? "bg-emerald-500 text-black shadow-xs"
+                                : "text-gray-400 hover:text-white"
+                            }`}
+                          >
+                            🌟 Όλα
+                          </button>
+                        </div>
+
+                        {/* Open Detailed Modal button */}
+                        <button
+                          onClick={() => openApprovalModal(u)}
+                          disabled={approvingUser === u.username}
+                          className={`px-4 py-2 text-xs font-black rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                            isPending
+                              ? "bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black shadow-emerald-500/20"
+                              : "bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700"
+                          }`}
+                        >
+                          {approvingUser === u.username ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : isPending ? (
+                            <CheckCircle2 className="w-4 h-4 fill-black text-emerald-400" />
+                          ) : (
+                            <Settings className="w-3.5 h-3.5 text-primary" />
+                          )}
+                          <span>{isPending ? "⚡ Έγκριση & Δικαιοδοσία" : "⚙️ Ρύθμιση Πρόσβασης"}</span>
+                        </button>
                       </div>
                     )}
                   </div>

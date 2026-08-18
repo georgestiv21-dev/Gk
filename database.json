@@ -18,74 +18,9 @@
           "dev_vlassis_phone_02"
         ]
       }
-    ],
-    [
-      "GC-DEMO-30DAYS",
-      {
-        "expiresAt": 1789340109241,
-        "deviceIds": [
-          "dev-mobile-android",
-          "dev-smart-tv"
-        ]
-      }
-    ],
-    [
-      "GC-GREEK-90DAYS",
-      {
-        "expiresAt": 1794524109241,
-        "deviceIds": [
-          "dev-tablet-ipad"
-        ]
-      }
-    ],
-    [
-      "GC-PREMIUM-1YEAR",
-      {
-        "expiresAt": 1818284109241,
-        "deviceIds": [
-          "dev-livingroom-tv"
-        ]
-      }
-    ],
-    [
-      "GC-VIP-2YEARS",
-      {
-        "expiresAt": 1849820109241,
-        "deviceIds": []
-      }
-    ],
-    [
-      "GC-EXPIRED-KEY",
-      {
-        "expiresAt": 1786316109241,
-        "deviceIds": [
-          "dev-old-phone"
-        ]
-      }
-    ],
-    [
-      "USER-DEMO-2026",
-      {
-        "expiresAt": 1789343028241,
-        "deviceIds": [
-          "dev_windows_pc_01",
-          "dev_android_phone_02"
-        ]
-      }
     ]
   ],
   "userAccounts": [
-    [
-      "admingctoons",
-      {
-        "username": "admingctoons",
-        "passwordHash": "g6975767770",
-        "licenseKey": "ADMIN-XMR-9999",
-        "status": "active",
-        "createdAt": 1786751028240,
-        "expiresAt": 9999999999999
-      }
-    ],
     [
       "admin",
       {
@@ -93,7 +28,7 @@
         "passwordHash": "admin",
         "licenseKey": "ADMIN-XMR-9999",
         "status": "active",
-        "createdAt": 1786751028240,
+        "createdAt": 1787062086113,
         "expiresAt": 9999999999999
       }
     ],
@@ -104,20 +39,8 @@
         "passwordHash": "adminVlassis132",
         "licenseKey": "ADMIN-VLASSIS-2026",
         "status": "active",
-        "createdAt": 1786751028240,
+        "createdAt": 1787062086113,
         "expiresAt": 9999999999999
-      }
-    ],
-    [
-      "user",
-      {
-        "username": "user",
-        "passwordHash": "user123",
-        "licenseKey": "USER-DEMO-2026",
-        "status": "active",
-        "createdAt": 1786751028241,
-        "expiresAt": 1789343028241,
-        "renewalsCount": 1
       }
     ]
   ],
@@ -129,13 +52,13 @@
           "deviceId": "dev_vlassis_pc_01",
           "deviceName": "Windows PC (Vlassis Admin)",
           "ip": "192.168.1.100",
-          "lastActive": 1786750728240
+          "lastActive": 1787061786113
         },
         {
           "deviceId": "dev_vlassis_phone_02",
           "deviceName": "iPhone / iPad (Vlassis)",
           "ip": "192.168.1.101",
-          "lastActive": 1786749228240
+          "lastActive": 1787060286113
         }
       ]
     ],
@@ -146,51 +69,38 @@
           "deviceId": "dev_vlassis_pc_01",
           "deviceName": "Windows PC (Vlassis Admin)",
           "ip": "192.168.1.100",
-          "lastActive": 1786750728240
+          "lastActive": 1787061786113
         },
         {
           "deviceId": "dev_vlassis_phone_02",
           "deviceName": "iPhone / iPad (Vlassis)",
           "ip": "192.168.1.101",
-          "lastActive": 1786749228240
-        }
-      ]
-    ],
-    [
-      "user",
-      [
-        {
-          "deviceId": "dev_windows_pc_01",
-          "deviceName": "Windows PC (Home)",
-          "ip": "192.168.1.45",
-          "lastActive": 1786750128241
-        },
-        {
-          "deviceId": "dev_android_phone_02",
-          "deviceName": "Android Συσκευή (Mobile)",
-          "ip": "192.168.1.88",
-          "lastActive": 1786743828241
-        }
-      ]
-    ],
-    [
-      "user-demo-2026",
-      [
-        {
-          "deviceId": "dev_windows_pc_01",
-          "deviceName": "Windows PC (Home)",
-          "ip": "192.168.1.45",
-          "lastActive": 1786750128241
-        },
-        {
-          "deviceId": "dev_android_phone_02",
-          "deviceName": "Android Συσκευή (Mobile)",
-          "ip": "192.168.1.88",
-          "lastActive": 1786743828241
+          "lastActive": 1787060286113
         }
       ]
     ]
   ],
   "screenRecordAlertsMap": [],
-  "videos": []
+  "videos": [
+    {
+      "id": "d88711cc-9043-4d2e-9a1a-1de0c4c6386a",
+      "title": "Avatar: The Last Airbender",
+      "description": "Το Άβαταρ: Ο Τελευταίος Ανεμοδαμαστής γνωστό και ως Άβαταρ: Ο Τελευταίος Μαχητής του Ανέμου και Άβαταρ: Ο Θρύλος του Άανγκ είναι αμερικάνικη τηλεοπτική σειρά κινουμένων σχεδίων. Η σειρά έγινε γνωστή μέσα από το τηλεοπτικό κανάλι Nickelodeon και πολλές κριτικές αναφέρουν ότι είναι ίσως και μια από τις καλύτερες σειρές κινουμένων σχεδίων όλων των εποχών.",
+      "url": "/api/stream?key=Gctoons%2FAvatar.The.Last.Airbender.2003.S01E01.The.Boy.in.the.Iceberg.EN-GR.1080p.v2.x265.AMZN.WEB-DL-evstav.mkv",
+      "thumbnail": "https://images.metahub.space/poster/small/tt0417299/img",
+      "type": "series",
+      "year": "2005",
+      "category": "gctunes",
+      "episodes": [
+        {
+          "id": "1787059235566-ep-1-15zc",
+          "episodeNumber": 1,
+          "title": "Επεισόδιο 1: Πιλότος χωρίς εκπομπή",
+          "description": "Επεισόδιο 1 της σειράς Avatar: The Last Airbender.",
+          "thumbnail": "https://episodes.metahub.space/tt0417299/0/1/w780.jpg",
+          "url": "/api/stream?key=Gctoons%2FAvatar.The.Last.Airbender.2003.S01E01.The.Boy.in.the.Iceberg.EN-GR.1080p.v2.x265.AMZN.WEB-DL-evstav.mkv"
+        }
+      ]
+    }
+  ]
 }

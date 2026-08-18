@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import cors from "cors";
@@ -7,14 +8,16 @@ import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import multer from "multer";
 import ffmpeg from "fluent-ffmpeg";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { spawn } from "child_process";
+import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand } from "@aws-sdk/client-s3";
+import type { Readable } from "stream";
 
 const app = express();
 const PORT = 3000;
 
 app.use(cors());
-app.use(express.json({ limit: "500gb" }));
-app.use(express.urlencoded({ limit: "500gb", extended: true }));
+app.use(express.json({ limit: "50gb" }));
+app.use(express.urlencoded({ limit: "50gb", extended: true }));
 
 
 // In-memory Database for Demo
@@ -40,11 +43,6 @@ const DAY = 24 * 60 * 60 * 1000;
 
 validLicenseKeys.set(ADMIN_KEY, { expiresAt: 9999999999999, deviceIds: ["dev-admin-pc"] });
 validLicenseKeys.set(ADMIN_VLASSIS_KEY, { expiresAt: 9999999999999, deviceIds: ["dev_vlassis_pc_01", "dev_vlassis_phone_02"] });
-validLicenseKeys.set("GC-DEMO-30DAYS", { expiresAt: now + 30 * DAY, deviceIds: ["dev-mobile-android", "dev-smart-tv"] });
-validLicenseKeys.set("GC-GREEK-90DAYS", { expiresAt: now + 90 * DAY, deviceIds: ["dev-tablet-ipad"] });
-validLicenseKeys.set("GC-PREMIUM-1YEAR", { expiresAt: now + 365 * DAY, deviceIds: ["dev-livingroom-tv"] });
-validLicenseKeys.set("GC-VIP-2YEARS", { expiresAt: now + 730 * DAY, deviceIds: [] });
-validLicenseKeys.set("GC-EXPIRED-KEY", { expiresAt: now - 5 * DAY, deviceIds: ["dev-old-phone"] });
 
 // Anonymous Chat System Data Structure (RAM only, no logs)
 export interface ChatMessage {
@@ -86,9 +84,12 @@ interface Video {
   description: string;
   url: string; // The offshore object storage URL
   thumbnail: string;
+  backdrop?: string;
+  genres?: string[];
   type: "movie" | "series";
   year?: string;
   episodes?: Episode[];
+  category?: "gctunes" | "greek_streaming";
 }
 
 let videos: Video[] = [];
@@ -103,6 +104,7 @@ export interface UserAccount {
   expiresAt: number;
   deviceId?: string;
   renewalsCount?: number;
+  libraryAccess?: "gctunes" | "greek_streaming" | "both";
 }
 
 export interface ConnectedDevice {
@@ -152,7 +154,12 @@ function loadDatabase() {
       }
       if (data.videos) {
         videos.length = 0;
-        videos.push(...data.videos);
+        videos.push(
+          ...data.videos.map((v: any) => ({
+            ...v,
+            title: v.title ? v.title.replace(/\s*[\(\[]\s*\d{4}\s*[\)\]]\s*$/, "").trim() : v.title
+          }))
+        );
       }
       console.log("Database loaded from JSON.");
     } catch (e) {
@@ -253,37 +260,6 @@ userDevicesMap.set("adminvlassis", [
 ]);
 userDevicesMap.set(ADMIN_VLASSIS_KEY.toLowerCase(), userDevicesMap.get("adminvlassis")!);
 
-// Default Non-Admin Active Test User
-const DEMO_USER_KEY = "USER-DEMO-2026";
-userAccounts.set("user", {
-  username: "user",
-  passwordHash: "user123",
-  licenseKey: DEMO_USER_KEY,
-  status: "active",
-  createdAt: Date.now(),
-  expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  renewalsCount: 1,
-});
-validLicenseKeys.set(DEMO_USER_KEY, {
-  expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  deviceIds: ["dev_windows_pc_01", "dev_android_phone_02"]
-});
-userDevicesMap.set("user", [
-  {
-    deviceId: "dev_windows_pc_01",
-    deviceName: "Windows PC (Home)",
-    ip: "192.168.1.45",
-    lastActive: Date.now() - 1000 * 60 * 15
-  },
-  {
-    deviceId: "dev_android_phone_02",
-    deviceName: "Android Συσκευή (Mobile)",
-    ip: "192.168.1.88",
-    lastActive: Date.now() - 1000 * 60 * 60 * 2
-  }
-]);
-userDevicesMap.set(DEMO_USER_KEY.toLowerCase(), userDevicesMap.get("user")!);
-
 // Helper to get or create chat session for a user/key
 function getOrCreateSession(keyOrUsername: string, deviceId: string = "dev-default"): ChatSession {
   let session = chatSessions.get(keyOrUsername);
@@ -347,7 +323,8 @@ app.post("/api/signup", (req, res) => {
     createdAt: now,
     expiresAt: 0,
     deviceId,
-    renewalsCount: 0
+    renewalsCount: 0,
+    libraryAccess: "both"
   };
 
   userAccounts.set(cleanUsername, newUser);
@@ -366,6 +343,7 @@ app.post("/api/signup", (req, res) => {
     licenseKey: newUser.licenseKey,
     status: "pending",
     isAdmin: false,
+    libraryAccess: newUser.libraryAccess || "both",
     expiresAt: 0
   });
 });
@@ -389,6 +367,7 @@ app.post("/api/login", (req, res) => {
       isAdmin: true,
       isReadOnlyAdmin: false,
       status: "active",
+      libraryAccess: "both",
       key: ADMIN_KEY,
       expiresAt: 9999999999999
     });
@@ -418,6 +397,7 @@ app.post("/api/login", (req, res) => {
       isAdmin: true,
       isReadOnlyAdmin: true,
       status: "active",
+      libraryAccess: "both",
       key: ADMIN_VLASSIS_KEY,
       expiresAt: 9999999999999,
       deviceCount: keyData.deviceIds.length,
@@ -451,6 +431,7 @@ app.post("/api/login", (req, res) => {
       key: user.licenseKey,
       isAdmin: false,
       status: isActive ? "active" : "pending",
+      libraryAccess: user.libraryAccess || "both",
       expiresAt: keyData?.expiresAt || user.expiresAt || 0
     });
   }
@@ -483,6 +464,7 @@ app.post("/api/login", (req, res) => {
       key: trimmedKey,
       isAdmin: false,
       status: isActive ? "active" : "pending",
+      libraryAccess: matchedUser?.libraryAccess || "both",
       expiresAt: keyData?.expiresAt || 0
     });
   }
@@ -497,11 +479,11 @@ app.post("/api/user-status", (req, res) => {
   const trimmedKey = (licenseKey || "").trim().toUpperCase();
 
   if (cleanUsername === "admin" || cleanUsername === "admingctoons" || trimmedKey === ADMIN_KEY) {
-    return res.json({ status: "active", isAdmin: true, isReadOnlyAdmin: false });
+    return res.json({ status: "active", isAdmin: true, isReadOnlyAdmin: false, libraryAccess: "both" });
   }
 
   if (cleanUsername === "adminvlassis" || trimmedKey === ADMIN_VLASSIS_KEY) {
-    return res.json({ status: "active", isAdmin: true, isReadOnlyAdmin: true });
+    return res.json({ status: "active", isAdmin: true, isReadOnlyAdmin: true, libraryAccess: "both" });
   }
 
   if (cleanUsername) {
@@ -510,18 +492,25 @@ app.post("/api/user-status", (req, res) => {
       const keyData = validLicenseKeys.get(user.licenseKey);
       const now = Date.now();
       const isActive = (keyData && keyData.expiresAt > now) || user.status === "active";
-      return res.json({ status: isActive ? "active" : "pending", isAdmin: false });
+      return res.json({ status: isActive ? "active" : "pending", isAdmin: false, libraryAccess: user.libraryAccess || "both" });
     }
   }
 
   if (trimmedKey) {
+    let matchedUser: UserAccount | undefined;
+    for (const u of userAccounts.values()) {
+      if (u.licenseKey === trimmedKey) {
+        matchedUser = u;
+        break;
+      }
+    }
     const keyData = validLicenseKeys.get(trimmedKey);
     const now = Date.now();
     const isActive = (keyData && keyData.expiresAt > now);
-    return res.json({ status: isActive ? "active" : "pending", isAdmin: false });
+    return res.json({ status: isActive ? "active" : "pending", isAdmin: false, libraryAccess: matchedUser?.libraryAccess || "both" });
   }
 
-  return res.json({ status: "pending", isAdmin: false });
+  return res.json({ status: "pending", isAdmin: false, libraryAccess: "both" });
 });
 
 // --- ANONYMOUS CHAT & ACTIVATION SYSTEM ENDPOINTS ---
@@ -839,6 +828,7 @@ app.get("/api/admin/users", (req, res) => {
         daysRemaining: daysRemaining,
         renewalsCount: u.renewalsCount !== undefined ? u.renewalsCount : (isActive ? 1 : 0),
         isAdmin: false,
+        libraryAccess: u.libraryAccess || "both",
         screenRecordAlertsCount: alertInfo.count,
         lastScreenRecordAlert: alertInfo.lastAlert,
         screenRecordDetails: alertInfo.details
@@ -994,9 +984,9 @@ app.post("/api/user/devices/delete", (req, res) => {
   });
 });
 
-// 2. Admin: Approve User (Set/Reset access duration to specified days)
+// 2. Admin: Approve User (Set/Reset access duration to specified days & assign library access)
 app.post("/api/admin/users/approve", (req, res) => {
-  const { adminKey, username, days = 30 } = req.body;
+  const { adminKey, username, days = 30, libraryAccess = "both" } = req.body;
   if (!isAdminKey(adminKey)) {
     return res.status(403).json({ error: "Δεν έχετε δικαιώματα διαχειριστή." });
   }
@@ -1019,12 +1009,24 @@ app.post("/api/admin/users/approve", (req, res) => {
   user.status = "active";
   user.expiresAt = newExpiresAt;
   user.renewalsCount = (user.renewalsCount || 0) + 1;
+  if (libraryAccess === "gctunes" || libraryAccess === "greek_streaming" || libraryAccess === "both") {
+    user.libraryAccess = libraryAccess;
+  }
   userAccounts.set(cleanUsername, user);
 
   // Update License Key Expiration in validLicenseKeys map
   const keyData = validLicenseKeys.get(user.licenseKey) || { expiresAt: 0, deviceIds: [] };
   keyData.expiresAt = newExpiresAt;
   validLicenseKeys.set(user.licenseKey, keyData);
+
+  // Persist changes
+  saveDatabase();
+
+  const accessLabel = user.libraryAccess === "gctunes" 
+    ? "Greek Cartoons (GC Tunes)" 
+    : user.libraryAccess === "greek_streaming" 
+    ? "Greek Streaming" 
+    : "Πλήρης (Cartoons & Streaming)";
 
   // Update Chat Session if present
   const chat = chatSessions.get(cleanUsername) || chatSessions.get(user.licenseKey);
@@ -1034,7 +1036,7 @@ app.post("/api/admin/users/approve", (req, res) => {
     chat.messages.push({
       id: `msg-${now}-approve`,
       sender: "admin",
-      text: `🎉 Ο λογαριασμός σας (${user.username}) εγκρίθηκε και ενεργοποιήθηκε για +${days} ημέρες! (Νέα λήξη: ${new Date(newExpiresAt).toLocaleDateString('el-GR')}).`,
+      text: `🎉 Ο λογαριασμός σας (${user.username}) εγκρίθηκε και ενεργοποιήθηκε για +${days} ημέρες! Δικαίωμα πρόσβασης: ${accessLabel}. (Νέα λήξη: ${new Date(newExpiresAt).toLocaleDateString('el-GR')}).`,
       timestamp: now
     });
   }
@@ -1044,8 +1046,41 @@ app.post("/api/admin/users/approve", (req, res) => {
     username: user.username,
     licenseKey: user.licenseKey,
     status: "active",
+    libraryAccess: user.libraryAccess || "both",
     expiresAt: newExpiresAt,
     daysRemaining: Math.ceil((newExpiresAt - now) / (24 * 60 * 60 * 1000))
+  });
+});
+
+// 2.1 Admin: Update User Library Access Directly
+app.post("/api/admin/users/update-access", (req, res) => {
+  const { adminKey, username, libraryAccess } = req.body;
+  if (!isAdminKey(adminKey)) {
+    return res.status(403).json({ error: "Δεν έχετε δικαιώματα διαχειριστή." });
+  }
+  if (isReadOnlyAdminKey(adminKey)) {
+    return res.status(403).json({ error: "Ο λογαριασμός adminvlassis δεν έχει δικαίωμα τροποποίησης πρόσβασης." });
+  }
+
+  const cleanUsername = (username || "").trim().toLowerCase();
+  const user = userAccounts.get(cleanUsername);
+
+  if (!user) {
+    return res.status(404).json({ error: "Ο χρήστης δεν βρέθηκε." });
+  }
+
+  if (libraryAccess !== "gctunes" && libraryAccess !== "greek_streaming" && libraryAccess !== "both") {
+    return res.status(400).json({ error: "Μη έγκυρος τύπος πρόσβασης." });
+  }
+
+  user.libraryAccess = libraryAccess;
+  userAccounts.set(cleanUsername, user);
+  saveDatabase();
+
+  res.json({
+    success: true,
+    username: user.username,
+    libraryAccess: user.libraryAccess
   });
 });
 
@@ -1343,23 +1378,244 @@ async function translateToGreek(text: string): Promise<string> {
 // ============================================
 // VIDEO UPLOAD & HLS PROCESSING (STORJ S3)
 // ============================================
-let s3Client: S3Client | null = null;
-try {
-  s3Client = new S3Client({
+
+function getStorjConfig() {
+  const accessKey = (process.env.STORJ_ACCESS_KEY || process.env.STORJ_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || "").trim();
+  const secretKey = (process.env.STORJ_SECRET_KEY || process.env.STORJ_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || "").trim();
+  const bucketName = (process.env.STORJ_BUCKET_NAME || process.env.STORJ_BUCKET || process.env.BUCKET_NAME || "").trim();
+  const endpoint = (process.env.STORJ_ENDPOINT || process.env.AWS_ENDPOINT_URL || "https://gateway.storjshare.io").trim().replace(/\/$/, "");
+
+  return {
+    accessKey,
+    secretKey,
+    bucketName,
+    endpoint,
+    isConfigured: Boolean(accessKey && secretKey && bucketName)
+  };
+}
+
+function getS3Client(): S3Client | null {
+  const config = getStorjConfig();
+  if (!config.isConfigured) {
+    return null;
+  }
+  return new S3Client({
     region: "eu-1",
-    endpoint: process.env.STORJ_ENDPOINT || "https://gateway.storjshare.io",
+    endpoint: config.endpoint,
     credentials: {
-      accessKeyId: process.env.STORJ_ACCESS_KEY || "",
-      secretAccessKey: process.env.STORJ_SECRET_KEY || ""
+      accessKeyId: config.accessKey,
+      secretAccessKey: config.secretKey
     },
     forcePathStyle: true
   });
-} catch (e) {
-  console.warn("Failed to initialize S3 Client. Storj credentials may be missing.");
 }
 
+// Secure Stream Proxy Endpoint for S3/Storj (Handles Auth, CORS, Range Headers & On-The-Fly Transcoding for MKV/TS)
+app.get("/api/stream", async (req, res) => {
+  let rawKey = (req.query.key as string || req.query.url as string || "").trim();
+  if (!rawKey) {
+    return res.status(400).send("Missing video key or URL parameter");
+  }
+
+  const storjConfig = getStorjConfig();
+  const s3 = getS3Client();
+
+  if (!storjConfig.isConfigured || !s3) {
+    return res.status(500).send("Storage backend credentials are not configured.");
+  }
+
+  // Normalize key: handle full URLs like https://gateway.storjshare.io/bucket/key
+  let objectKey = rawKey;
+  if (objectKey.startsWith("http://") || objectKey.startsWith("https://")) {
+    try {
+      const urlObj = new URL(objectKey);
+      const pathParts = urlObj.pathname.split("/").filter(Boolean);
+      if (pathParts.length >= 2 && pathParts[0].toLowerCase() === storjConfig.bucketName.toLowerCase()) {
+        objectKey = pathParts.slice(1).join("/");
+      } else if (pathParts.length >= 1) {
+        objectKey = pathParts.join("/");
+      }
+    } catch (e) {}
+  }
+  
+  try {
+    objectKey = decodeURIComponent(objectKey);
+  } catch (e) {}
+  objectKey = objectKey.replace(/^\/+/, "");
+
+  const lowerKey = objectKey.toLowerCase();
+  const range = req.headers.range;
+
+  // Formats that browsers cannot natively decode or need dynamic remuxing/transcoding (MKV, AVI, TS, MOV, WMV)
+  const isNonNativeFormat = lowerKey.endsWith(".mkv") || 
+                            lowerKey.endsWith(".avi") || 
+                            lowerKey.endsWith(".wmv") || 
+                            lowerKey.endsWith(".flv") || 
+                            (lowerKey.endsWith(".ts") && !lowerKey.includes("master") && !lowerKey.includes("index")) ||
+                            lowerKey.includes("x265") || 
+                            lowerKey.includes("hevc");
+
+  try {
+    // Helper to get S3 object with fallback searching
+    let s3Response: any;
+    try {
+      s3Response = await s3.send(new GetObjectCommand({
+        Bucket: storjConfig.bucketName,
+        Key: objectKey,
+        Range: isNonNativeFormat ? undefined : range
+      }));
+    } catch (err: any) {
+      if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
+        // Attempt fallback search across bucket if key had different path prefix
+        try {
+          const listRes = await s3.send(new ListObjectsV2Command({
+            Bucket: storjConfig.bucketName,
+            MaxKeys: 100
+          }));
+          const filename = objectKey.split("/").pop()?.toLowerCase();
+          const matchedKey = listRes.Contents?.find(c => {
+            if (!c.Key) return false;
+            const cName = c.Key.split("/").pop()?.toLowerCase();
+            return cName === filename || (filename && cName && (cName.includes(filename) || filename.includes(cName)));
+          })?.Key;
+
+          if (matchedKey && matchedKey !== objectKey) {
+            console.log(`Found alternative key match in bucket: ${matchedKey} (requested: ${objectKey})`);
+            s3Response = await s3.send(new GetObjectCommand({
+              Bucket: storjConfig.bucketName,
+              Key: matchedKey,
+              Range: isNonNativeFormat ? undefined : range
+            }));
+            objectKey = matchedKey;
+          } else {
+            throw err;
+          }
+        } catch (searchErr) {
+          console.warn(`[Stream Proxy] Video key not found in bucket '${storjConfig.bucketName}': ${objectKey}`);
+          return res.status(404).json({
+            error: "NoSuchKey",
+            message: `Το αρχείο βίντεο (${objectKey}) δεν βρέθηκε στο bucket ${storjConfig.bucketName}. Ελέγξτε αν υπάρχει στο Storj.`
+          });
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    if (isNonNativeFormat) {
+      // Dynamic on-the-fly streaming to web-native fragmented MP4 (H.264 + AAC)
+      const s3Stream = s3Response.Body as Readable;
+
+      if (!s3Stream) {
+        return res.status(404).send("Stream body not available from storage.");
+      }
+
+      res.setHeader("Content-Type", "video/mp4");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Range, Authorization, Origin, Content-Type, Accept");
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+      const ffmpegArgs = [
+        "-i", "pipe:0",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-tune", "zerolatency",
+        "-crf", "22",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-f", "mp4",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "pipe:1"
+      ];
+
+      const ffmpegProc = spawn("ffmpeg", ffmpegArgs);
+
+      s3Stream.pipe(ffmpegProc.stdin);
+      ffmpegProc.stdout.pipe(res);
+
+      ffmpegProc.stderr.on("data", (_data) => {
+        // stream processing output
+      });
+
+      const cleanUp = () => {
+        try {
+          if (ffmpegProc && !ffmpegProc.killed) {
+            ffmpegProc.kill("SIGKILL");
+          }
+        } catch (e) {}
+      };
+
+      req.on("close", cleanUp);
+      res.on("close", cleanUp);
+      res.on("finish", cleanUp);
+
+      ffmpegProc.on("error", (err) => {
+        console.error("FFmpeg live transcode error:", err.message);
+        cleanUp();
+        if (!res.headersSent) {
+          res.status(500).send("Live transcode error.");
+        }
+      });
+
+      return;
+    }
+
+    let contentType = s3Response.ContentType || "video/mp4";
+    if (lowerKey.endsWith(".m3u8")) {
+      contentType = "application/x-mpegURL";
+    } else if (lowerKey.endsWith(".mp4")) {
+      contentType = "video/mp4";
+    } else if (lowerKey.endsWith(".webm")) {
+      contentType = "video/webm";
+    }
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Range, Authorization, Origin, Content-Type, Accept");
+
+    if (s3Response.ContentRange) {
+      res.setHeader("Content-Range", s3Response.ContentRange);
+      res.status(206);
+    } else if (range && s3Response.ContentLength) {
+      res.status(206);
+    } else {
+      res.status(200);
+    }
+
+    if (s3Response.ContentLength) {
+      res.setHeader("Content-Length", s3Response.ContentLength);
+    }
+
+    const stream = s3Response.Body as Readable;
+    if (stream && typeof stream.pipe === "function") {
+      stream.pipe(res);
+    } else if (stream) {
+      const chunks: any[] = [];
+      for await (const chunk of stream as any) {
+        chunks.push(chunk);
+      }
+      res.end(Buffer.concat(chunks));
+    } else {
+      res.status(404).send("Stream body not available");
+    }
+  } catch (error: any) {
+    console.error("Stream Proxy Error for key:", objectKey, error.message);
+    if (error.name === "NoSuchKey" || error.$metadata?.httpStatusCode === 404) {
+      return res.status(404).send("Video file not found in storage bucket.");
+    }
+    return res.status(500).send("Streaming error: " + (error.message || "Unknown error"));
+  }
+});
+
 const upload = multer({ 
-  dest: "/tmp/uploads/"
+  dest: "/tmp/uploads/",
+  limits: {
+    fileSize: 50 * 1024 * 1024 * 1024, // 50 GB
+    fieldSize: 50 * 1024 * 1024 * 1024
+  }
 });
 
 app.post("/api/admin/videos/upload", upload.single("video"), async (req, res) => {
@@ -1372,11 +1628,13 @@ app.post("/api/admin/videos/upload", upload.single("video"), async (req, res) =>
     return res.status(400).json({ error: "No video file provided." });
   }
 
-  const storjBucket = process.env.STORJ_BUCKET_NAME;
-  if (!s3Client || !process.env.STORJ_ACCESS_KEY || !storjBucket) {
-    return res.status(500).json({ error: "Storj credentials not configured in Settings." });
+  const storjConfig = getStorjConfig();
+  const s3 = getS3Client();
+  if (!storjConfig.isConfigured || !s3) {
+    return res.status(500).json({ error: "Τα Storj credentials δεν έχουν οριστεί (STORJ_ACCESS_KEY, STORJ_SECRET_KEY, STORJ_BUCKET_NAME)." });
   }
 
+  const storjBucket = storjConfig.bucketName;
   const fileId = uuidv4();
   const inputPath = req.file.path;
   const outputDir = path.join("/tmp", `hls_${fileId}`);
@@ -1387,101 +1645,299 @@ app.post("/api/admin/videos/upload", upload.single("video"), async (req, res) =>
 
   console.log(`Starting HLS processing for fileId: ${fileId}...`);
 
-  try {
-    // Process video with fluent-ffmpeg
-    await new Promise((resolve, reject) => {
-      ffmpeg(inputPath)
-        .outputOptions([
-          '-c:v h264',
-          '-c:a aac',
-          '-hls_time 10',
-          '-hls_list_size 0', // keep all segments in the playlist
-          '-f hls'
-        ])
-        .output(path.join(outputDir, 'playlist.m3u8'))
-        .on('end', () => {
-          console.log(`HLS processing completed for ${fileId}`);
-          resolve(true);
-        })
-        .on('error', (err) => {
-          console.error(`FFmpeg error for ${fileId}:`, err);
-          reject(err);
-        })
-        .run();
-    });
+  // Public URL format for Storj S3 Gateway
+  const hlsUrl = `${storjConfig.endpoint}/${storjBucket}/${fileId}/playlist.m3u8`;
+  
+  // Respond immediately so the client (mobile browser/axios) doesn't timeout!
+  res.json({
+    success: true,
+    hlsUrl: hlsUrl,
+    message: "Η επεξεργασία του βίντεο ξεκίνησε στο παρασκήνιο. Θα εμφανιστεί μόλις ολοκληρωθεί!"
+  });
 
-    console.log(`Uploading ${fileId} segments to Storj...`);
-    const files = fs.readdirSync(outputDir);
+  // Start the heavy FFmpeg work asynchronously in the background
+  (async () => {
+    try {
+      // Process video with fluent-ffmpeg
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputPath)
+          .outputOptions([
+            '-c:v h264',
+            '-c:a aac',
+            '-hls_time 10',
+            '-hls_list_size 0', // keep all segments in the playlist
+            '-f hls'
+          ])
+          .output(path.join(outputDir, 'playlist.m3u8'))
+          .on('end', () => {
+            console.log(`HLS processing completed for ${fileId}`);
+            resolve(true);
+          })
+          .on('error', (err) => {
+            console.error(`FFmpeg error for ${fileId}:`, err);
+            reject(err);
+          })
+          .run();
+      });
 
-    for (const file of files) {
-      const filePath = path.join(outputDir, file);
-      const fileContent = fs.readFileSync(filePath);
+      console.log(`Uploading ${fileId} segments to Storj...`);
+      const files = fs.readdirSync(outputDir);
+
+      for (const file of files) {
+        const filePath = path.join(outputDir, file);
+        const fileContent = fs.readFileSync(filePath);
+        
+        let contentType = 'application/octet-stream';
+        if (file.endsWith('.m3u8')) contentType = 'application/x-mpegURL';
+        else if (file.endsWith('.ts')) contentType = 'video/MP2T';
+
+        await s3.send(new PutObjectCommand({
+          Bucket: storjBucket,
+          Key: `${fileId}/${file}`,
+          Body: fileContent,
+          ContentType: contentType
+        }));
+      }
       
-      let contentType = 'application/octet-stream';
-      if (file.endsWith('.m3u8')) contentType = 'application/x-mpegURL';
-      else if (file.endsWith('.ts')) contentType = 'video/MP2T';
+      // Clean up local temp files
+      try {
+        fs.rmSync(inputPath, { force: true });
+        fs.rmSync(outputDir, { recursive: true, force: true });
+      } catch (cleanupErr) {
+        console.warn("Cleanup error (ignored):", cleanupErr);
+      }
+      
+      console.log(`Upload complete for ${fileId}. HLS URL: ${hlsUrl}`);
 
-      await s3Client.send(new PutObjectCommand({
-        Bucket: storjBucket,
-        Key: `${fileId}/${file}`,
-        Body: fileContent,
-        ContentType: contentType
-      }));
+    } catch (error: any) {
+      console.error("HLS processing/upload error:", error);
+      try {
+        fs.rmSync(inputPath, { force: true });
+        fs.rmSync(outputDir, { recursive: true, force: true });
+      } catch(e) {}
     }
-    
-    // Clean up local temp files
-    try {
-      fs.rmSync(inputPath, { force: true });
-      fs.rmSync(outputDir, { recursive: true, force: true });
-    } catch (cleanupErr) {
-      console.warn("Cleanup error (ignored):", cleanupErr);
-    }
-
-    // Public URL format for Storj S3 Gateway
-    const hlsUrl = `https://gateway.storjshare.io/${storjBucket}/${fileId}/playlist.m3u8`;
-    
-    console.log(`Upload complete for ${fileId}. HLS URL: ${hlsUrl}`);
-
-    res.json({
-      success: true,
-      hlsUrl: hlsUrl,
-      message: "Το βίντεο μετατράπηκε και ανέβηκε επιτυχώς στο Storj!"
-    });
-
-  } catch (error: any) {
-    console.error("HLS processing/upload error:", error);
-    try {
-      fs.rmSync(inputPath, { force: true });
-      fs.rmSync(outputDir, { recursive: true, force: true });
-    } catch(e) {}
-    res.status(500).json({ error: "Αποτυχία επεξεργασίας/αποστολής του βίντεο.", details: error.message });
-  }
+  })();
 });
 
-// 6. Admin: Add Video
-app.post("/api/videos", async (req, res) => {
-  const { 
-    licenseKey, 
-    title, 
-    year,
-    type, 
-    episodeNumber,
-    url,
-    description,
-    thumbnail
-  } = req.body;
+// ============================================
+// AUTOMATIC STORJ SYNC & OFFICIAL METADATA (NO AI)
+// ============================================
+
+interface ParsedMedia {
+  key: string;
+  url: string;
+  title: string;
+  type: "movie" | "series";
+  year?: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  episodeFileName: string;
+  companionPosterUrl?: string;
+  category: "gctunes" | "greek_streaming";
+}
+
+const SUPPORTED_VIDEO_EXTENSIONS = [".m3u8", ".mp4", ".mkv", ".avi", ".mov", ".webm", ".ts"];
+
+function parseStorjMediaKey(
+  key: string, 
+  allImageKeys: string[], 
+  storjBucket: string, 
+  gatewayBase: string
+): ParsedMedia | null {
+  const lowerKey = key.toLowerCase();
   
-  if (licenseKey !== ADMIN_KEY) {
-    return res.status(403).json({ error: "Unauthorized. Admin key required." });
+  // Check if it has a valid media extension
+  const hasValidExt = SUPPORTED_VIDEO_EXTENSIONS.some(ext => lowerKey.endsWith(ext));
+  if (!hasValidExt) {
+    return null;
+  }
+  
+  // Ignore single .ts segment chunks inside an HLS stream (e.g. segment_001.ts, chunk-1.ts, data0.ts)
+  // But allow if it is a standalone main .ts video or master playlist
+  if (lowerKey.endsWith(".ts")) {
+    const isSegment = /[-_.]?(segment|chunk|data|part)?\d{1,5}\.ts$/i.test(lowerKey);
+    if (isSegment && !lowerKey.includes("master") && !lowerKey.includes("index")) {
+      return null;
+    }
   }
 
-  if (!title || !url) {
-    return res.status(400).json({ error: "Missing required fields (title, url)" });
+  // Ignore temporary folders and hidden files
+  if (lowerKey.includes("/tmp/") || lowerKey.includes("/.cache/") || lowerKey.startsWith(".")) {
+    return null;
   }
 
+  const parts = key.split("/").filter(Boolean);
+  if (parts.length === 0) return null;
+
+  // Use the secure internal proxy endpoint to guarantee cross-device playback and avoid S3 CORS/Auth blocks
+  const url = `/api/stream?key=${encodeURIComponent(key)}`;
+  
+  let rawTitle = "";
+  let seasonNumber = 1;
+  let episodeNumber = 1;
+  let year: string | undefined = undefined;
+  let type: "movie" | "series" = "series";
+  let category: "gctunes" | "greek_streaming" = "gctunes";
+
+  // Determine category based on path in Storj (gctunes vs Greek streaming)
+  const fullKeyLower = key.toLowerCase();
+  if (
+    fullKeyLower.startsWith("greek streaming") ||
+    fullKeyLower.startsWith("greek_streaming") ||
+    fullKeyLower.startsWith("greekstreaming") ||
+    parts.some(p => {
+      const l = p.toLowerCase();
+      return l === "greek streaming" || l === "greek_streaming" || l === "greekstreaming" || l === "streaming";
+    })
+  ) {
+    category = "greek_streaming";
+  } else if (
+    fullKeyLower.startsWith("gctunes") ||
+    fullKeyLower.startsWith("gctoons") ||
+    parts.some(p => {
+      const l = p.toLowerCase();
+      return l === "gctunes" || l === "gctoons" || l === "cartoons" || l === "paidika" || l === "παιδικα" || l === "παιδικά";
+    })
+  ) {
+    category = "gctunes";
+  } else {
+    category = "gctunes";
+  }
+
+  // Check for year in any path segment e.g. (2005) or 2005
+  for (const part of parts) {
+    const yMatch = part.match(/\b(19\d\d|20\d\d)\b/);
+    if (yMatch && !part.toLowerCase().startsWith("s0") && !part.toLowerCase().startsWith("s1") && !part.toLowerCase().startsWith("s2")) {
+      year = yMatch[1];
+    }
+  }
+
+  const isInsideMoviesFolder = parts.some(p => {
+    const l = p.toLowerCase();
+    return l === "movies" || l === "tainies" || l === "ταινιες" || l === "ταινίες" || l === "ταινια" || l === "movie";
+  });
+
+  const fullPathText = parts.join(" ");
+  
+  // Detect Season and Episode patterns: S01E02, S1 Ep 2, 1x02, E02, Επεισόδιο 2, Part 2, Ep.2, 02 - Title
+  const sxeMatch = fullPathText.match(/s(\d{1,2})[\s._-]*e(\d{1,3})/i) || fullPathText.match(/(\d{1,2})x(\d{1,3})/i);
+  const epOnlyMatch = fullPathText.match(/(?:ep|episode|επεισοδιο|επεισόδιο|ep\.|e|part|pt)[\s._-]*(\d{1,3})/i) || fullPathText.match(/\bE(\d{1,3})\b/i);
+  const seasonOnlyMatch = fullPathText.match(/(?:season|σεζον|σεζόν|κυκλος|κύκλος|s)[\s._-]*(\d{1,2})/i);
+  const leadingNumMatch = parts[parts.length - 1].match(/^(\d{1,3})[\s._-]+/);
+
+  if (sxeMatch) {
+    type = "series";
+    seasonNumber = parseInt(sxeMatch[1], 10);
+    episodeNumber = parseInt(sxeMatch[2], 10);
+  } else if (epOnlyMatch) {
+    type = "series";
+    episodeNumber = parseInt(epOnlyMatch[1], 10);
+    if (seasonOnlyMatch) {
+      seasonNumber = parseInt(seasonOnlyMatch[1], 10);
+    }
+  } else if (leadingNumMatch) {
+    type = "series";
+    episodeNumber = parseInt(leadingNumMatch[1], 10);
+    if (seasonOnlyMatch) {
+      seasonNumber = parseInt(seasonOnlyMatch[1], 10);
+    }
+  } else if (seasonOnlyMatch) {
+    type = "series";
+    seasonNumber = parseInt(seasonOnlyMatch[1], 10);
+    const lastPart = parts[parts.length - 1].replace(/\.(m3u8|mp4|mkv|avi|mov|webm|ts)$/i, "");
+    const numMatch = lastPart.match(/^(\d{1,3})$/) || lastPart.match(/(\d{1,3})/);
+    if (numMatch) episodeNumber = parseInt(numMatch[1], 10);
+  } else if (isInsideMoviesFolder || (parts.length === 1 && !/\d/.test(parts[0])) || (parts.length === 2 && parts[1].toLowerCase().startsWith("playlist"))) {
+    type = isInsideMoviesFolder ? "movie" : "series";
+  }
+
+  // Extract clean series/movie title
+  const cleanParts = parts.filter(p => {
+    const l = p.toLowerCase();
+    if (
+      l === "gctunes" || 
+      l === "gctoons" || 
+      l === "greek streaming" || 
+      l === "greek_streaming" || 
+      l === "greekstreaming" || 
+      l === "cartoons" || 
+      l === "series" || 
+      l === "movies" || 
+      l === "paidika" || 
+      l === "παιδικα" || 
+      l === "παιδικά" ||
+      l === "ταινιες" ||
+      l === "ταινίες" ||
+      l === "ταινια" ||
+      l === "movie"
+    ) return false;
+    if (l === "playlist.m3u8" || l === "master.m3u8" || l === "index.m3u8" || l === "stream.m3u8") return false;
+    if (/^s\d{1,2}e\d{1,3}/i.test(l)) return false;
+    if (/^(season|σεζον|σεζόν)\s*\d{1,2}/i.test(l)) return false;
+    if (/^(ep|episode|επεισοδιο|επεισόδιο)\s*\d{1,3}/i.test(l)) return false;
+    return true;
+  });
+
+  rawTitle = cleanParts.length > 0 ? cleanParts[0] : parts[0];
+
+  let cleanTitle = rawTitle
+    .replace(/\.(m3u8|mp4|mkv|avi|mov|webm|ts)$/i, "")
+    .replace(/\(\d{4}\)/g, "")
+    .replace(/\[\d{4}\]/g, "")
+    .replace(/s\d{1,2}e\d{1,3}/gi, "")
+    .replace(/s\d{1,2}/gi, "")
+    .replace(/e\d{1,3}/gi, "")
+    .replace(/\b(1080p|720p|480p|2160p|4k|bluray|web-dl|hls|x264|x265|aac|dvdrip|hdtv)\b/gi, "")
+    .replace(/[._-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleanTitle) {
+    cleanTitle = parts[0].replace(/\.[^/.]+$/, "");
+  }
+
+  // Check for Companion Poster in Storj Bucket (e.g. folder/poster.jpg or show/cover.png)
+  let companionPosterUrl: string | undefined = undefined;
+  const parentPrefix = parts.slice(0, -1).join("/");
+  const rootShowPrefix = parts[0];
+
+  const matchedImg = allImageKeys.find(imgKey => {
+    const l = imgKey.toLowerCase();
+    const isImage = l.endsWith(".jpg") || l.endsWith(".jpeg") || l.endsWith(".png") || l.endsWith(".webp");
+    if (!isImage) return false;
+    
+    if (parentPrefix && imgKey.startsWith(parentPrefix)) {
+      if (l.includes("poster") || l.includes("cover") || l.includes("folder") || l.includes("thumb")) return true;
+    }
+    if (imgKey.startsWith(rootShowPrefix)) {
+      if (l.includes("poster") || l.includes("cover") || l.includes("folder")) return true;
+    }
+    return false;
+  });
+
+  if (matchedImg) {
+    companionPosterUrl = `${gatewayBase}/${storjBucket}/${matchedImg}`;
+  }
+
+  return {
+    key,
+    url,
+    title: cleanTitle,
+    type,
+    year,
+    seasonNumber,
+    episodeNumber,
+    episodeFileName: parts[parts.length - 1],
+    companionPosterUrl,
+    category
+  };
+}
+
+// Deterministic Official Metadata Fetcher (Cinemeta / TVMaze / IMDb / Greek Wikipedia - Zero Generative AI)
+async function fetchOfficialMetadata(title: string, type: "movie" | "series", year?: string, episodeNumber?: number) {
   let finalTitle = title;
-  let finalDescription = description || "";
-  let finalThumbnail = thumbnail || "";
+  let finalDescription = "";
+  let finalThumbnail = "";
   let originalTitle = title;
   let episodeTitle = "";
   let episodeDescription = "";
@@ -1490,12 +1946,16 @@ app.post("/api/videos", async (req, res) => {
 
   const fetchHeaders = { "User-Agent": "StreamEA/1.0 (https://streamea.app; info@streamea.app)" };
 
-  // Perform automatic IMDb (Cinemeta) search
+  // Sanitize title for search query (remove commas, excess punctuation, typos)
+  const cleanSearchTitle = title
+    .replace(/[,._:;-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // 1. Try Cinemeta (Official IMDb / Cinemeta catalog)
   try {
     const searchType = type === "series" ? "series" : "movie";
-    
-    // First try searching with title + year if available
-    let searchQuery = year ? `${title} ${year}` : title;
+    let searchQuery = year ? `${cleanSearchTitle} ${year}` : cleanSearchTitle;
     let searchUrl = `https://v3-cinemeta.strem.io/catalog/${searchType}/top/search=${encodeURIComponent(searchQuery)}.json`;
     let searchRes = await fetch(searchUrl, { headers: fetchHeaders });
     let metas: any[] = [];
@@ -1505,10 +1965,9 @@ app.post("/api/videos", async (req, res) => {
       metas = searchData.metas || [];
     }
 
-    // Fallback: search title only if no results with year
-    if (metas.length === 0 && year) {
-      searchQuery = title;
-      searchUrl = `https://v3-cinemeta.strem.io/catalog/${searchType}/top/search=${encodeURIComponent(title)}.json`;
+    if (metas.length === 0) {
+      searchQuery = cleanSearchTitle;
+      searchUrl = `https://v3-cinemeta.strem.io/catalog/${searchType}/top/search=${encodeURIComponent(cleanSearchTitle)}.json`;
       searchRes = await fetch(searchUrl, { headers: fetchHeaders });
       if (searchRes.ok) {
         const searchData = await searchRes.json();
@@ -1537,13 +1996,13 @@ app.post("/api/videos", async (req, res) => {
       }
 
       if (!bestMeta) {
-        const cleanReqTitle = title.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const cleanReqTitle = cleanSearchTitle.toLowerCase().replace(/[^a-z0-9]/g, "");
         const exactMatches = metas.filter((m: any) => {
           const cleanM = String(m.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-          return cleanM === cleanReqTitle || cleanM.includes(cleanReqTitle);
+          return cleanM === cleanReqTitle || cleanM.includes(cleanReqTitle) || cleanReqTitle.includes(cleanM);
         });
 
-        if (exactMatches.length > 1) {
+        if (exactMatches.length > 0) {
           exactMatches.sort((a: any, b: any) => {
             const yA = parseInt((String(a.releaseInfo || a.year).match(/\b(19\d\d|20\d\d)\b/) || [])[1] || "9999", 10);
             const yB = parseInt((String(b.releaseInfo || b.year).match(/\b(19\d\d|20\d\d)\b/) || [])[1] || "9999", 10);
@@ -1555,7 +2014,6 @@ app.post("/api/videos", async (req, res) => {
         }
       }
 
-      // Fetch full metadata for selected candidate
       const detailsUrl = `https://v3-cinemeta.strem.io/meta/${searchType}/${bestMeta.id}.json`;
       const detailsRes = await fetch(detailsUrl, { headers: fetchHeaders });
       
@@ -1573,7 +2031,6 @@ app.post("/api/videos", async (req, res) => {
             if (yM) matchedYear = yM[1];
           }
 
-          // If series, find episode metadata
           if (type === "series" && meta.videos) {
             const epNum = Number(episodeNumber) || 1;
             const ep = meta.videos.find((v: any) => v.episode === epNum || v.number === epNum);
@@ -1587,12 +2044,53 @@ app.post("/api/videos", async (req, res) => {
       }
     }
   } catch (err) {
-    console.error("Automated Cinemeta fetch failed:", err);
+    console.error("Cinemeta fetch error:", err);
   }
 
-  // Try Wikipedia for Greek title and description translation
+  // 2. TVMaze Fallback for TV series (Handles typos like "Avatar, Laste Benderr", provides posters & episode details)
+  if (type === "series" && (!finalThumbnail || !episodeTitle)) {
+    try {
+      const tvMazeSearchUrl = `https://api.tvmaze.com/singlesearch/shows?q=${encodeURIComponent(cleanSearchTitle)}&embed=episodes`;
+      const tvRes = await fetch(tvMazeSearchUrl, { headers: fetchHeaders });
+      if (tvRes.ok) {
+        const show = await tvRes.json();
+        if (show && show.name) {
+          if (!finalThumbnail) {
+            finalThumbnail = show.image?.original || show.image?.medium || "";
+          }
+          if (!finalTitle || finalTitle === title) {
+            finalTitle = show.name;
+          }
+          if (show.premiered && !matchedYear) {
+            matchedYear = show.premiered.substring(0, 4);
+          }
+          if (!finalDescription && show.summary) {
+            finalDescription = show.summary.replace(/<[^>]*>?/gm, "").trim();
+          }
+
+          if (show._embedded && show._embedded.episodes) {
+            const epNum = Number(episodeNumber) || 1;
+            const ep = show._embedded.episodes.find((e: any) => e.number === epNum);
+            if (ep) {
+              if (!episodeTitle) episodeTitle = ep.name || `Επεισόδιο ${epNum}`;
+              if (!episodeDescription && ep.summary) {
+                episodeDescription = ep.summary.replace(/<[^>]*>?/gm, "").trim();
+              }
+              if (!episodeThumbnail) {
+                episodeThumbnail = ep.image?.original || ep.image?.medium || finalThumbnail;
+              }
+            }
+          }
+        }
+      }
+    } catch (tvErr) {
+      console.error("TVMaze fetch error:", tvErr);
+    }
+  }
+
+  // 3. Wikipedia for Greek Synopsis (if available)
   try {
-    const wikiTitleBase = originalTitle || title;
+    const wikiTitleBase = originalTitle || finalTitle || title;
     const wikiQuery = matchedYear ? `${wikiTitleBase} ${matchedYear}` : wikiTitleBase;
     const wikiSearchRes = await fetch(`https://el.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(wikiQuery)}&utf8=&format=json&origin=*`, { headers: fetchHeaders });
     
@@ -1606,23 +2104,18 @@ app.post("/api/videos", async (req, res) => {
           const wikiData = await wikiRes.json();
           const extract = wikiData.extract || "";
 
-          // Skip people / actors
           if (extract.includes("είναι Αμερικανός ηθοποιός") || extract.includes("είναι Αμερικανίδα ηθοποιός") || (extract.includes("ηθοποιός") && !extract.includes("σειρά") && !extract.includes("ταινία"))) {
             continue;
           }
-
-          // Skip future releases or mismatched remake articles
           if (matchedYear && Number(matchedYear) < 2020) {
             if (extract.includes("του 2026") || extract.includes("του 2025") || extract.includes("του 2024")) {
               continue;
             }
           }
-
           if (type === "series" && extract.includes("ταινία του") && !extract.includes("σειρά")) {
             continue;
           }
 
-          // Do NOT override finalTitle with Greek Wikipedia title (user wants English authentic titles for series/movies)
           if (wikiData.extract) finalDescription = wikiData.extract;
           if (!finalThumbnail && wikiData.thumbnail?.source) {
             finalThumbnail = wikiData.thumbnail.source;
@@ -1632,17 +2125,14 @@ app.post("/api/videos", async (req, res) => {
       }
     }
   } catch (err) {
-    console.error("Automated Wiki fetch failed:", err);
+    console.error("Wiki fetch error:", err);
   }
 
   if (!matchedYear) {
     const titleYearMatch = (finalTitle + " " + (originalTitle || title)).match(/\b(19\d\d|20\d\d)\b/);
-    if (titleYearMatch) {
-      matchedYear = titleYearMatch[1];
-    }
+    if (titleYearMatch) matchedYear = titleYearMatch[1];
   }
 
-  // Fallback defaults if anything is missing
   if (!finalThumbnail) {
     finalThumbnail = type === "series" 
       ? "https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?q=80&w=800&auto=format&fit=crop"
@@ -1652,14 +2142,355 @@ app.post("/api/videos", async (req, res) => {
     finalDescription = type === "series" ? `Σειρά: ${finalTitle}` : `Ταινία: ${finalTitle}`;
   }
 
+  // Ensure title never contains trailing year like (2005)
+  finalTitle = finalTitle.replace(/\s*[\(\[]\s*\d{4}\s*[\)\]]\s*$/, "").trim();
+
+  return {
+    finalTitle,
+    originalTitle,
+    finalThumbnail,
+    finalDescription,
+    matchedYear,
+    episodeTitle,
+    episodeDescription,
+    episodeThumbnail
+  };
+}
+
+// 5b. Admin: Scan & Auto-Sync from Storj Object Storage (Zero AI Required)
+app.post("/api/admin/storj-sync", async (req, res) => {
+  const adminKey = req.headers["x-admin-key"] as string || req.body?.adminKey;
+  if (!isAdminKey(adminKey) || isReadOnlyAdminKey(adminKey)) {
+    return res.status(403).json({ error: "Unauthorized. Admin key required." });
+  }
+
+  const storjConfig = getStorjConfig();
+  const s3 = getS3Client();
+  if (!storjConfig.isConfigured || !s3) {
+    return res.status(500).json({ 
+      error: `Τα Storj credentials δεν έχουν οριστεί σωστά. (AccessKey: ${storjConfig.accessKey ? "OK" : "Missing"}, SecretKey: ${storjConfig.secretKey ? "OK" : "Missing"}, Bucket: ${storjConfig.bucketName ? "OK" : "Missing"}). Ελέγξτε τις ρυθμίσεις στο Settings -> Secrets.` 
+    });
+  }
+
+  const storjBucket = storjConfig.bucketName;
+  const gatewayBase = storjConfig.endpoint;
+
+  try {
+    console.log(`Starting Storj Bucket Scan for bucket: ${storjBucket}...`);
+    
+    // Fetch all objects in bucket
+    let allObjects: any[] = [];
+    let continuationToken: string | undefined = undefined;
+
+    do {
+      const listCommand = new ListObjectsV2Command({
+        Bucket: storjBucket,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000
+      });
+      const listRes = await s3.send(listCommand);
+      if (listRes.Contents) {
+        allObjects.push(...listRes.Contents);
+      }
+      continuationToken = listRes.NextContinuationToken;
+    } while (continuationToken);
+
+    console.log(`Storj Scan found ${allObjects.length} total objects in bucket.`);
+
+    const allKeys = allObjects.map(o => o.Key || "").filter(Boolean);
+    const allImageKeys = allKeys.filter(k => {
+      const l = k.toLowerCase();
+      return l.endsWith(".jpg") || l.endsWith(".jpeg") || l.endsWith(".png") || l.endsWith(".webp");
+    });
+
+    // Find all media files (.m3u8, .mp4, .mkv, .avi, .mov, .webm, .ts)
+    const mediaKeys = allKeys.filter(k => {
+      const l = k.toLowerCase();
+      const hasExt = SUPPORTED_VIDEO_EXTENSIONS.some(ext => l.endsWith(ext));
+      if (!hasExt) return false;
+      if (l.endsWith(".ts")) {
+        const isSegment = /[-_.]?(segment|chunk|data|part)?\d{1,5}\.ts$/i.test(l);
+        if (isSegment && !l.includes("master") && !l.includes("index")) return false;
+      }
+      return !l.includes("/tmp/") && !l.includes("/.cache/") && !l.startsWith(".");
+    });
+
+    console.log(`Found ${mediaKeys.length} media playlist/video files.`);
+
+    let addedCount = 0;
+    let updatedCount = 0;
+    const syncLog: string[] = [];
+    const detectedItems: Array<{
+      key: string;
+      title: string;
+      year?: string;
+      type: "series" | "movie";
+      category: "gctunes" | "greek_streaming";
+      categoryLabel: string;
+      episodeNumber?: number;
+      episodeTitle?: string;
+      thumbnail: string;
+      storageUrl: string;
+      status: "created" | "updated" | "already_indexed";
+      statusText: string;
+    }> = [];
+
+    for (const key of mediaKeys) {
+      const parsed = parseStorjMediaKey(key, allImageKeys, storjBucket, gatewayBase);
+      if (!parsed) continue;
+
+      // Check if this exact video URL or key is already in our catalog
+      const existingVideo = videos.find(v => {
+        if (v.url === parsed.url || v.url?.includes(encodeURIComponent(key)) || v.url?.includes(key)) return true;
+        if (v.episodes && v.episodes.some(e => e.url === parsed.url || e.url?.includes(encodeURIComponent(key)) || e.url?.includes(key))) return true;
+        return false;
+      });
+
+      if (existingVideo) {
+        // Already indexed media file - update url to proxy endpoint if needed
+        if (existingVideo.url && (existingVideo.url.includes("gateway.storjshare.io") || existingVideo.url.includes("gateway."))) {
+          existingVideo.url = parsed.url;
+        }
+        const ep = existingVideo.episodes?.find(e => e.url === parsed.url || e.url?.includes(encodeURIComponent(key)) || e.url?.includes(key));
+        if (ep) {
+          ep.url = parsed.url;
+        }
+        detectedItems.push({
+          key,
+          title: existingVideo.title,
+          year: existingVideo.year,
+          type: existingVideo.type,
+          category: parsed.category,
+          categoryLabel: parsed.category === "greek_streaming" ? "Greek Streaming" : "Greek Cartoons",
+          episodeNumber: ep?.episodeNumber || (parsed.type === "series" ? parsed.episodeNumber : undefined),
+          episodeTitle: ep?.title,
+          thumbnail: ep?.thumbnail || existingVideo.thumbnail,
+          storageUrl: parsed.url,
+          status: "already_indexed",
+          statusText: "Δημιουργήθηκε στο UI με επιτυχία"
+        });
+        continue;
+      }
+
+      console.log(`Processing media: ${parsed.title} (Type: ${parsed.type}, Ep: ${parsed.episodeNumber})...`);
+
+      // Fetch official deterministic metadata (IMDb/Cinemeta & Wiki)
+      const meta = await fetchOfficialMetadata(parsed.title, parsed.type, parsed.year, parsed.episodeNumber);
+
+      const resolvedThumbnail = parsed.companionPosterUrl || meta.finalThumbnail;
+      const cleanTitle = meta.finalTitle || parsed.title;
+      const matchedYear = meta.matchedYear || parsed.year;
+
+      if (parsed.type === "series") {
+        const epNum = parsed.episodeNumber;
+        let formattedEpTitle = `Επεισόδιο ${epNum}`;
+
+        if (meta.episodeTitle) {
+          const translated = await translateToGreek(meta.episodeTitle);
+          const lower = translated.toLowerCase();
+          if (lower.startsWith("επεισόδιο") || lower.startsWith("episode")) {
+            formattedEpTitle = translated;
+          } else {
+            formattedEpTitle = `Επεισόδιο ${epNum}: ${translated}`;
+          }
+        }
+
+        let formattedEpDesc = meta.episodeDescription 
+          ? await translateToGreek(meta.episodeDescription) 
+          : `Επεισόδιο ${epNum} της σειράς ${cleanTitle}.`;
+
+        const epItem: Episode = {
+          id: `${Date.now()}-ep-${epNum}-${Math.random().toString(36).substring(2, 6)}`,
+          episodeNumber: epNum,
+          title: formattedEpTitle,
+          description: formattedEpDesc,
+          thumbnail: meta.episodeThumbnail || resolvedThumbnail,
+          url: parsed.url
+        };
+
+        // Check if this series already exists in catalog
+        const cleanReqTitle = cleanTitle.toLowerCase().trim();
+        const existingSeriesIndex = videos.findIndex(v => {
+          if (v.type !== "series") return false;
+          const cleanV = v.title.toLowerCase().trim();
+          const titleMatches = cleanV === cleanReqTitle || cleanV.includes(cleanReqTitle) || cleanReqTitle.includes(cleanV);
+          if (!titleMatches) return false;
+
+          if (v.year && matchedYear) {
+            const y1 = parseInt(v.year, 10);
+            const y2 = parseInt(matchedYear, 10);
+            if (!isNaN(y1) && !isNaN(y2) && Math.abs(y1 - y2) > 3) return false;
+          }
+          return true;
+        });
+
+        if (existingSeriesIndex !== -1) {
+          const existingSeries = videos[existingSeriesIndex];
+          existingSeries.episodes = existingSeries.episodes || [];
+          existingSeries.year = matchedYear || existingSeries.year;
+          existingSeries.category = parsed.category || existingSeries.category || "gctunes";
+          
+          const epIdx = existingSeries.episodes.findIndex(e => e.episodeNumber === epNum);
+          if (epIdx !== -1) {
+            existingSeries.episodes[epIdx] = epItem;
+          } else {
+            existingSeries.episodes.push(epItem);
+            existingSeries.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+          }
+
+          if (resolvedThumbnail && (!existingSeries.thumbnail || existingSeries.thumbnail.includes("unsplash"))) {
+            existingSeries.thumbnail = resolvedThumbnail;
+          }
+          if (meta.finalDescription && (!existingSeries.description || existingSeries.description.length < meta.finalDescription.length)) {
+            existingSeries.description = meta.finalDescription;
+          }
+
+          updatedCount++;
+          syncLog.push(`Ενημερώθηκε σειρά "${cleanTitle}" [${parsed.category === "greek_streaming" ? "Greek Streaming" : "GC Tunes"}] με το Επεισόδιο ${epNum}`);
+          
+          detectedItems.push({
+            key,
+            title: cleanTitle,
+            year: matchedYear,
+            type: "series",
+            category: parsed.category,
+            categoryLabel: parsed.category === "greek_streaming" ? "Greek Streaming" : "Greek Cartoons",
+            episodeNumber: epNum,
+            episodeTitle: formattedEpTitle,
+            thumbnail: epItem.thumbnail || resolvedThumbnail,
+            storageUrl: parsed.url,
+            status: "updated",
+            statusText: "Δημιουργήθηκε στο UI με επιτυχία"
+          });
+        } else {
+          // New Series
+          const newSeries: Video = {
+            id: uuidv4(),
+            title: cleanTitle,
+            description: meta.finalDescription || `Σειρά: ${cleanTitle}`,
+            url: parsed.url,
+            thumbnail: resolvedThumbnail,
+            type: "series",
+            year: matchedYear,
+            category: parsed.category,
+            episodes: [epItem]
+          };
+
+          videos.unshift(newSeries);
+          addedCount++;
+          syncLog.push(`Προστέθηκε νέα σειρά "${cleanTitle}" [${parsed.category === "greek_streaming" ? "Greek Streaming" : "GC Tunes"}] (Επεισόδιο ${epNum})`);
+
+          detectedItems.push({
+            key,
+            title: cleanTitle,
+            year: matchedYear,
+            type: "series",
+            category: parsed.category,
+            categoryLabel: parsed.category === "greek_streaming" ? "Greek Streaming" : "Greek Cartoons",
+            episodeNumber: epNum,
+            episodeTitle: formattedEpTitle,
+            thumbnail: epItem.thumbnail || resolvedThumbnail,
+            storageUrl: parsed.url,
+            status: "created",
+            statusText: "Δημιουργήθηκε στο UI με επιτυχία"
+          });
+        }
+      } else {
+        // Movie
+        const newMovie: Video = {
+          id: uuidv4(),
+          title: cleanTitle,
+          description: meta.finalDescription || `Ταινία: ${cleanTitle}`,
+          url: parsed.url,
+          thumbnail: resolvedThumbnail,
+          type: "movie",
+          category: parsed.category,
+          year: matchedYear
+        };
+
+        videos.unshift(newMovie);
+        addedCount++;
+        syncLog.push(`Προστέθηκε ταινία "${cleanTitle}" [${parsed.category === "greek_streaming" ? "Greek Streaming" : "GC Tunes"}]`);
+
+        detectedItems.push({
+          key,
+          title: cleanTitle,
+          year: matchedYear,
+          type: "movie",
+          category: parsed.category,
+          categoryLabel: parsed.category === "greek_streaming" ? "Greek Streaming" : "Greek Cartoons",
+          thumbnail: resolvedThumbnail,
+          storageUrl: parsed.url,
+          status: "created",
+          statusText: "Δημιουργήθηκε στο UI με επιτυχία"
+        });
+      }
+    }
+
+    // Persist changes to database.json
+    saveDatabase();
+
+    const resultMsg = mediaKeys.length === 0
+      ? `Η σύνδεση με το Storj Bucket "${storjBucket}" πέτυχε 100%! Δεν βρέθηκαν νέα αρχεία .m3u8 ή .mp4 στο bucket.`
+      : `Ο αυτόματος συγχρονισμός ολοκληρώθηκε με επιτυχία! Εντοπίστηκαν ${mediaKeys.length} αρχεία στο Storage και δημιουργήθηκαν στο UI.`;
+
+    return res.json({
+      success: true,
+      scannedMediaFiles: mediaKeys.length,
+      addedCount,
+      updatedCount,
+      totalCatalogVideos: videos.length,
+      detectedItems,
+      log: syncLog,
+      message: resultMsg
+    });
+
+  } catch (err: any) {
+    console.error("Storj Sync Error:", err);
+    return res.status(500).json({ error: err.message || "Αποτυχία συγχρονισμού από το Storj" });
+  }
+});
+
+// 6. Admin: Add Video
+app.post("/api/videos", async (req, res) => {
+  const { 
+    licenseKey, 
+    title, 
+    year,
+    type, 
+    episodeNumber,
+    url,
+    description,
+    thumbnail,
+    category = "gctunes"
+  } = req.body;
+  
+  if (licenseKey !== ADMIN_KEY) {
+    return res.status(403).json({ error: "Unauthorized. Admin key required." });
+  }
+
+  if (!title || !url) {
+    return res.status(400).json({ error: "Missing required fields (title, url)" });
+  }
+
+  const validatedCategory: "gctunes" | "greek_streaming" = category === "greek_streaming" ? "greek_streaming" : "gctunes";
+
+  // Fetch official deterministic metadata (Cinemeta / Wikipedia)
+  const meta = await fetchOfficialMetadata(title, type, year, episodeNumber);
+
+  const finalTitle = title || meta.finalTitle;
+  const finalDescription = description || meta.finalDescription || (type === "series" ? `Σειρά: ${finalTitle}` : `Ταινία: ${finalTitle}`);
+  const finalThumbnail = thumbnail || meta.finalThumbnail;
+  const matchedYear = meta.matchedYear || year;
+
   let finalEpisodes: Episode[] = [];
 
   if (type === "series") {
     const epNum = Number(episodeNumber) || 1;
     let formattedEpTitle = `Επεισόδιο ${epNum}`;
 
-    if (episodeTitle) {
-      const translated = await translateToGreek(episodeTitle);
+    if (meta.episodeTitle) {
+      const translated = await translateToGreek(meta.episodeTitle);
       const lower = translated.toLowerCase();
       if (lower.startsWith("επεισόδιο") || lower.startsWith("episode")) {
         formattedEpTitle = translated;
@@ -1668,19 +2499,21 @@ app.post("/api/videos", async (req, res) => {
       }
     }
 
-    let formattedEpDesc = episodeDescription ? await translateToGreek(episodeDescription) : `Επεισόδιο ${epNum} της σειράς ${finalTitle}.`;
+    let formattedEpDesc = meta.episodeDescription 
+      ? await translateToGreek(meta.episodeDescription) 
+      : (description || `Επεισόδιο ${epNum} της σειράς ${finalTitle}.`);
 
     const epItem: Episode = {
       id: `${Date.now()}-ep-${epNum}`,
       episodeNumber: epNum,
       title: formattedEpTitle,
       description: formattedEpDesc,
-      thumbnail: episodeThumbnail || finalThumbnail,
+      thumbnail: meta.episodeThumbnail || finalThumbnail,
       url: url
     };
     finalEpisodes = [epItem];
 
-    // Check if series already exists (with matching year if available)
+    // Check if series already exists
     const cleanNewTitle = finalTitle.toLowerCase().trim();
     const existingSeriesIndex = videos.findIndex(v => {
       if (v.type !== "series") return false;
@@ -1693,15 +2526,17 @@ app.post("/api/videos", async (req, res) => {
         const y1 = parseInt(v.year, 10);
         const y2 = parseInt(targetY, 10);
         if (!isNaN(y1) && !isNaN(y2) && Math.abs(y1 - y2) > 3) {
-          return false; // e.g. 2005 animated vs 2024 live action
+          return false;
         }
       }
       return true;
     });
+
     if (existingSeriesIndex !== -1) {
       const existingSeries = videos[existingSeriesIndex];
       existingSeries.episodes = existingSeries.episodes || [];
       existingSeries.year = matchedYear || existingSeries.year || year;
+      existingSeries.category = validatedCategory;
       
       const existingEpIndex = existingSeries.episodes.findIndex(e => e.episodeNumber === epNum);
       if (existingEpIndex !== -1) {
@@ -1711,7 +2546,6 @@ app.post("/api/videos", async (req, res) => {
         existingSeries.episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
       }
       
-      // Update series poster/description if new valid values found
       if (finalThumbnail && (!existingSeries.thumbnail || existingSeries.thumbnail.includes('unsplash'))) {
         existingSeries.thumbnail = finalThumbnail;
       }
@@ -1721,6 +2555,7 @@ app.post("/api/videos", async (req, res) => {
 
       videos.splice(existingSeriesIndex, 1);
       videos.unshift(existingSeries);
+      saveDatabase();
       
       return res.status(201).json({ video: existingSeries });
     }
@@ -1733,12 +2568,90 @@ app.post("/api/videos", async (req, res) => {
     url,
     thumbnail: finalThumbnail,
     type,
+    category: validatedCategory,
     year: matchedYear || year,
     episodes: finalEpisodes
   };
   
   videos.unshift(newVideo);
+  saveDatabase();
   res.json({ success: true, video: newVideo });
+});
+
+// 7. Admin Live Edit: Update Video Details (Title, Poster, Description, Year, Episodes, Category, etc.)
+app.put("/api/videos/:id", async (req, res) => {
+  const { id } = req.params;
+  const adminKey = (req.headers["x-admin-key"] as string) || req.body?.adminKey || req.body?.licenseKey;
+
+  if (!isAdminKey(adminKey) || isReadOnlyAdminKey(adminKey)) {
+    return res.status(403).json({ error: "Unauthorized. Admin key required." });
+  }
+
+  const videoIndex = videos.findIndex(v => v.id === id);
+  if (videoIndex === -1) {
+    return res.status(404).json({ error: "Video not found" });
+  }
+
+  const current = videos[videoIndex];
+  const {
+    title,
+    description,
+    thumbnail,
+    backdrop,
+    year,
+    type,
+    category,
+    url,
+    episodes,
+    genres
+  } = req.body;
+
+  const updatedVideo: Video = {
+    ...current,
+    title: typeof title === "string" ? title.trim() : current.title,
+    description: typeof description === "string" ? description.trim() : current.description,
+    thumbnail: typeof thumbnail === "string" ? thumbnail.trim() : current.thumbnail,
+    url: typeof url === "string" ? url.trim() : current.url,
+    type: type === "series" || type === "movie" ? type : current.type,
+    category: category === "greek_streaming" || category === "gctunes" ? category : current.category,
+    year: typeof year === "string" ? year.trim() : current.year,
+    backdrop: typeof backdrop === "string" ? backdrop.trim() : (current as any).backdrop,
+    genres: Array.isArray(genres) ? genres : (current as any).genres,
+    episodes: Array.isArray(episodes) ? episodes : current.episodes
+  };
+
+  // If type is series and episodes have been updated, make sure they are sorted
+  if (updatedVideo.type === "series" && updatedVideo.episodes) {
+    updatedVideo.episodes.sort((a, b) => (a.episodeNumber || 1) - (b.episodeNumber || 1));
+  }
+
+  videos[videoIndex] = updatedVideo;
+  saveDatabase();
+
+  console.log(`[Admin Live Edit] Successfully updated video "${updatedVideo.title}" (${updatedVideo.id})`);
+  return res.json({ success: true, video: updatedVideo });
+});
+
+// 8. Admin Live Edit: Delete Video
+app.delete("/api/videos/:id", async (req, res) => {
+  const { id } = req.params;
+  const adminKey = (req.headers["x-admin-key"] as string) || req.body?.adminKey || (req.query.adminKey as string);
+
+  if (!isAdminKey(adminKey) || isReadOnlyAdminKey(adminKey)) {
+    return res.status(403).json({ error: "Unauthorized. Admin key required." });
+  }
+
+  const videoIndex = videos.findIndex(v => v.id === id);
+  if (videoIndex === -1) {
+    return res.status(404).json({ error: "Video not found" });
+  }
+
+  const removedTitle = videos[videoIndex].title;
+  videos.splice(videoIndex, 1);
+  saveDatabase();
+
+  console.log(`[Admin Live Edit] Successfully deleted video "${removedTitle}" (${id})`);
+  return res.json({ success: true, message: `Ο τίτλος "${removedTitle}" διαγράφηκε επιτυχώς.` });
 });
 
 // --- VITE MIDDLEWARE FOR DEVELOPMENT / STATIC SERVING FOR PRODUCTION ---
@@ -1757,9 +2670,12 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${PORT}`);
   });
+  server.setTimeout(0);
+  server.keepAliveTimeout = 0;
+  server.headersTimeout = 0;
 }
 
 startServer();

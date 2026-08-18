@@ -95,6 +95,14 @@ export default function UserProfileDevices({ username, licenseKey, onLogout }: U
     return <Globe className="w-5 h-5 text-primary" />;
   };
 
+  const libraryAccess = localStorage.getItem("libraryAccess") || "both";
+
+  const getLibraryTierName = () => {
+    if (libraryAccess === "gctunes") return "🧸 Greek Cartoons (GC Tunes)";
+    if (libraryAccess === "greek_streaming") return "🎬 Greek Streaming";
+    return "🌟 Πλήρης Πρόσβαση (Greek Cartoons & Greek Streaming)";
+  };
+
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
       {/* User Account Info Card */}
@@ -105,10 +113,10 @@ export default function UserProfileDevices({ username, licenseKey, onLogout }: U
 
         <div>
           <h3 className="text-xl font-black text-white">Ο Λογαριασμός σας ({username || "Χρήστης"})</h3>
-          <p className="text-xs text-gray-400 mt-1">Ενεργή συνδρομή Greek Cartoons</p>
+          <p className="text-xs text-gray-400 mt-1">Ενεργή συνδρομή Greek Streaming</p>
         </div>
 
-        <div className="p-4 bg-dark rounded-2xl border border-gray-800 text-left space-y-2 text-xs">
+        <div className="p-4 bg-dark rounded-2xl border border-gray-800 text-left space-y-2.5 text-xs">
           <div className="flex justify-between items-center text-gray-400">
             <span>License Key:</span>
             <span className="font-mono text-primary font-bold">{licenseKey}</span>
@@ -118,6 +126,12 @@ export default function UserProfileDevices({ username, licenseKey, onLogout }: U
             <span className="text-green-400 font-bold flex items-center gap-1">
               <CheckCircle2 className="w-3.5 h-3.5" />
               Ενεργό
+            </span>
+          </div>
+          <div className="flex justify-between items-center text-gray-400 pt-2 border-t border-gray-800/80">
+            <span>Δικαιοδοσία / Βιβλιοθήκη:</span>
+            <span className="text-amber-400 font-bold">
+              {getLibraryTierName()}
             </span>
           </div>
         </div>

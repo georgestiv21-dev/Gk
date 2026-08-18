@@ -194,7 +194,7 @@ export default function Login() {
           </div>
 
           <p className="text-xs text-gray-600 mt-6 text-center">
-            Greek Cartoons Streaming Platform &bull; Protected & Encrypted
+            Greek Streaming Platform &bull; Protected & Encrypted
           </p>
         </div>
       </div>

@@ -11,8 +11,12 @@ import {
   ChevronLeft,
   Lock,
   Sparkles,
-  ListVideo
+  ListVideo,
+  AlertTriangle,
+  RotateCw,
+  Loader2
 } from 'lucide-react';
+import Hls from 'hls.js';
 import type { Video } from '../types';
 import AppBar from '../components/AppBar';
 
@@ -23,6 +27,7 @@ export default function VideoPlayer() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
   const [currentVideo, setCurrentVideo] = useState<Video | null>(initialVideo || null);
   const [currentEpisode, setCurrentEpisode] = useState<number>(
@@ -32,6 +37,8 @@ export default function VideoPlayer() {
   // Player size mode: 'compact' (480p window), 'expanded' (theater mode), 'fullscreen' (full window)
   const [playerSize, setPlayerSize] = useState<'compact' | 'expanded' | 'fullscreen'>('compact');
   const [isProtected, setIsProtected] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
     if (!initialVideo) {
@@ -39,12 +46,138 @@ export default function VideoPlayer() {
     }
   }, [initialVideo, navigate]);
 
+  // Compute active video stream source URL
+  const getActiveStreamUrl = () => {
+    if (!currentVideo) return '';
+    let rawUrl = '';
+    if (currentVideo.type === 'series' && currentVideo.episodes && currentVideo.episodes.length > 0) {
+      const ep = currentVideo.episodes.find(e => e.episodeNumber === currentEpisode);
+      rawUrl = ep?.url || currentVideo.url || '';
+    } else {
+      rawUrl = currentVideo.url || '';
+    }
+
+    // Convert direct Storj gateway links or non-native format links to the server's streaming proxy
+    if (rawUrl.includes('gateway.storjshare.io') || rawUrl.includes('storjshare.io') || rawUrl.includes('/storj/')) {
+      const match = rawUrl.match(/storjshare\.io\/[^/]+\/(.+)$/);
+      if (match && match[1]) {
+        return `/api/stream?key=${encodeURIComponent(match[1])}`;
+      }
+    }
+    if (rawUrl.startsWith('http') && (rawUrl.includes('.mkv') || rawUrl.includes('.avi') || rawUrl.includes('.ts'))) {
+      return `/api/stream?url=${encodeURIComponent(rawUrl)}`;
+    }
+    return rawUrl;
+  };
+
+  const activeUrl = getActiveStreamUrl();
+
+  // Handle HLS and MP4 playback setup
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !activeUrl) return;
+
+    setIsLoading(true);
+    setPlaybackError(null);
+
+    // Clean up previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    const isHls = activeUrl.includes('.m3u8') || activeUrl.endsWith('.m3u8');
+
+    if (isHls && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        backBufferLength: 90
+      });
+      hlsRef.current = hls;
+
+      hls.loadSource(activeUrl);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setIsLoading(false);
+        video.play().catch(() => {});
+      });
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              console.warn('HLS Network Error, recovering...', data);
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              console.warn('HLS Media Error, recovering...', data);
+              hls.recoverMediaError();
+              break;
+            default:
+              console.error('Fatal HLS Error:', data);
+              hls.destroy();
+              setPlaybackError('Αποτυχία φόρτωσης ροής βίντεο (HLS Stream).');
+              setIsLoading(false);
+              break;
+          }
+        }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl') && isHls) {
+      // Native Apple HLS (Safari/iOS)
+      video.src = activeUrl;
+      video.load();
+      video.play().catch(() => {});
+    } else {
+      // Direct MP4 / WebM video stream
+      video.src = activeUrl;
+      video.load();
+      video.play().catch(() => {});
+    }
+
+    const handleCanPlay = () => setIsLoading(false);
+    const handleWaiting = () => setIsLoading(true);
+    const handlePlaying = () => {
+      setIsLoading(false);
+      setPlaybackError(null);
+    };
+    const handleError = async () => {
+      setIsLoading(false);
+      try {
+        if (activeUrl.startsWith('/api/stream') || activeUrl.startsWith('http')) {
+          const checkRes = await fetch(activeUrl, { method: 'HEAD' });
+          if (checkRes.status === 404) {
+            setPlaybackError('Το αρχείο βίντεο δεν υπάρχει στο Storj bucket (πιθανώς διαγράφηκε, μετονομάστηκε ή μετακινήθηκε).');
+            return;
+          }
+        }
+      } catch (e) {}
+      setPlaybackError('Δεν ήταν δυνατή η αναπαραγωγή του αρχείου βίντεο. Βεβαιωθείτε ότι το αρχείο υπάρχει στο Storj storage.');
+    };
+
+    video.addEventListener('canplay', handleCanPlay);
+    video.addEventListener('waiting', handleWaiting);
+    video.addEventListener('playing', handlePlaying);
+    video.addEventListener('error', handleError);
+
+    return () => {
+      video.removeEventListener('canplay', handleCanPlay);
+      video.removeEventListener('waiting', handleWaiting);
+      video.removeEventListener('playing', handlePlaying);
+      video.removeEventListener('error', handleError);
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [activeUrl]);
+
   // Anti-Screen Recording & Protection Listeners
   useEffect(() => {
     const handleContext = (e: Event) => e.preventDefault();
 
     const handleKeydown = (e: KeyboardEvent) => {
-      // Intercept PrintScreen, F12, DevTools, Inspect Element, Screen Grabber shortcuts
       if (
         e.key === 'PrintScreen' ||
         e.key === 'F12' ||
@@ -98,10 +231,6 @@ export default function VideoPlayer() {
 
   const handleSelectEpisode = (epNum: number) => {
     setCurrentEpisode(epNum);
-    if (videoRef.current) {
-      videoRef.current.currentTime = 0;
-      videoRef.current.play().catch(() => {});
-    }
   };
 
   const handleNextEpisode = () => {
@@ -127,6 +256,15 @@ export default function VideoPlayer() {
     }
   };
 
+  const handleReloadPlayer = () => {
+    setPlaybackError(null);
+    setIsLoading(true);
+    if (videoRef.current) {
+      videoRef.current.load();
+      videoRef.current.play().catch(() => {});
+    }
+  };
+
   return (
     <div className="min-h-screen bg-darker text-white flex flex-col select-none relative overflow-x-hidden">
       {/* Native App Top Navigation Bar */}
@@ -142,7 +280,7 @@ export default function VideoPlayer() {
             🔒 Απαγορεύεται η Καταγραφή Οθόνης
           </h2>
           <p className="text-gray-400 text-sm max-w-md">
-            Προστασία Πνευματικών Δικαιωμάτων Greek Cartoons DRM Engine.
+            Προστασία Πνευματικών Δικαιωμάτων Greek Streaming DRM Engine.
             Η αναπαραγωγή ανεστάλη προσωρινά.
           </p>
         </div>
@@ -160,17 +298,12 @@ export default function VideoPlayer() {
             <ArrowLeft className="w-4 h-4 text-primary" />
             <span>Πίσω στο Dashboard</span>
           </button>
-
-          <div className="flex items-center gap-2 text-xs font-mono text-gray-400 bg-dark px-3 py-1.5 rounded-lg border border-gray-800">
-            <Lock className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Encrypted Stream: {currentVideo.type === 'series' ? `E${currentEpisode}` : 'Movie'}</span>
-          </div>
         </div>
 
         {/* --- VIDEO PLAYER WINDOW SECTION --- */}
         <div
           ref={containerRef}
-          className={`relative bg-black rounded-3xl overflow-hidden border border-gray-800/80 shadow-2xl transition-all duration-300 mx-auto w-full ${
+          className={`relative bg-black rounded-3xl overflow-hidden border border-gray-800/80 shadow-2xl transition-all duration-300 mx-auto w-full flex items-center justify-center ${
             playerSize === 'compact'
               ? 'max-w-4xl aspect-video'
               : playerSize === 'expanded'
@@ -178,6 +311,32 @@ export default function VideoPlayer() {
               : 'fixed inset-0 z-50 rounded-none border-none aspect-none w-full h-full'
           }`}
         >
+          {/* Loading Spinner */}
+          {isLoading && !playbackError && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-xs pointer-events-none">
+              <Loader2 className="w-12 h-12 text-primary animate-spin mb-2" />
+              <span className="text-xs font-bold text-gray-300 tracking-wider">Φόρτωση ροής βίντεο...</span>
+            </div>
+          )}
+
+          {/* Playback Error Overlay with Retry */}
+          {playbackError && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/90 p-6 text-center">
+              <div className="w-14 h-14 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center border border-red-500/30 mb-3 shadow-xl">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-1">Σφάλμα Αναπαραγωγής</h3>
+              <p className="text-xs sm:text-sm text-gray-400 max-w-md mb-4">{playbackError}</p>
+              <button
+                onClick={handleReloadPlayer}
+                className="px-5 py-2.5 bg-primary hover:bg-primary-dark text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-lg shadow-primary/30 cursor-pointer transition-all"
+              >
+                <RotateCw className="w-4 h-4" />
+                <span>Δοκιμή Ξανά</span>
+              </button>
+            </div>
+          )}
+
           {/* Player Window Header Bar */}
           <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/90 via-black/50 to-transparent z-30 flex items-center justify-between opacity-0 hover:opacity-100 transition-opacity duration-300">
             <div className="flex items-center gap-2">
@@ -215,10 +374,10 @@ export default function VideoPlayer() {
           {/* Video Stream Element */}
           <video
             ref={videoRef}
-            src={currentVideo.type === 'series' && currentVideo.episodes ? (currentVideo.episodes.find(ep => ep.episodeNumber === currentEpisode)?.url || currentVideo.url) : currentVideo.url}
             className="w-full h-full object-contain outline-none bg-black"
             controls
             autoPlay
+            playsInline
             controlsList="nodownload noremoteplayback"
             disablePictureInPicture
             onContextMenu={(e) => e.preventDefault()}
@@ -229,56 +388,38 @@ export default function VideoPlayer() {
           />
         </div>
 
-        {/* Video Player Info & Quick Controls */}
-        <div className="bg-panel/90 backdrop-blur-xl p-6 rounded-3xl border border-gray-800/80 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold text-primary uppercase tracking-wider">
-                {currentVideo.type === 'series' ? `Σειρά &bull; Επεισόδιο ${currentEpisode}` : 'Ταινία'}
-              </span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white">
-              {currentVideo.title} {currentVideo.type === 'series' && `- Επεισόδιο ${currentEpisode}`}
-            </h1>
+        {/* Next / Prev Episode Fast Action Controls */}
+        {currentVideo.type === 'series' && (
+          <div className="flex items-center justify-between gap-3 py-1">
+            <button
+              onClick={handlePrevEpisode}
+              disabled={currentEpisode <= 1}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-200 hover:text-white text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Προηγούμενο Επεισόδιο</span>
+            </button>
+
+            <button
+              onClick={handleNextEpisode}
+              disabled={currentEpisode >= totalEpisodes}
+              className="px-4 py-2 bg-primary hover:bg-primary-dark disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-bold rounded-xl transition-all shadow-md shadow-primary/20 flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>Επόμενο Επεισόδιο</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
-
-          {/* Next / Prev Episode Fast Action Controls */}
-          {currentVideo.type === 'series' && (
-            <div className="flex items-center gap-3 shrink-0">
-              <button
-                onClick={handlePrevEpisode}
-                disabled={currentEpisode <= 1}
-                className="px-4 py-2.5 bg-dark hover:bg-gray-800 border border-gray-800 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                <span>Προηγούμενο</span>
-              </button>
-
-              <button
-                onClick={handleNextEpisode}
-                disabled={currentEpisode >= totalEpisodes}
-                className="px-5 py-2.5 bg-primary hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-primary/20 flex items-center gap-1.5"
-              >
-                <span>Επόμενο</span>
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-        </div>
+        )}
 
         {/* --- REMAINING EPISODES PLAYLIST SECTION --- */}
         {currentVideo.type === 'series' && (
-          <div className="space-y-4 pt-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                <ListVideo className="w-5 h-5 text-primary" />
-                <span>Υπόλοιπα Επεισόδια ({totalEpisodes})</span>
-              </h3>
-              <span className="text-xs text-gray-400">Επιλέξτε επεισόδιο για άμεση αναπαραγωγή</span>
-            </div>
+          <div className="space-y-3 pt-1">
+            <h3 className="text-sm sm:text-base font-bold text-gray-300 flex items-center gap-2">
+              <ListVideo className="w-4 h-4 text-primary" />
+              <span>Υπόλοιπα Επεισόδια ({totalEpisodes})</span>
+            </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {(currentVideo.episodes || []).map((ep) => {
                 const epNum = ep.episodeNumber;
                 const isPlaying = epNum === currentEpisode;
@@ -287,37 +428,32 @@ export default function VideoPlayer() {
                   <div
                     key={ep.id}
                     onClick={() => handleSelectEpisode(epNum)}
-                    className={`p-4 rounded-2xl border transition-all cursor-pointer flex gap-4 items-center group ${
+                    className={`p-3 rounded-xl border transition-all cursor-pointer flex gap-3 items-center group ${
                       isPlaying
-                        ? 'bg-primary/10 border-primary/50 shadow-lg shadow-primary/10'
-                        : 'bg-panel/80 hover:bg-dark border-gray-800/80 hover:border-gray-700'
+                        ? 'bg-primary/10 border-primary/50 shadow-md shadow-primary/10'
+                        : 'bg-panel hover:bg-dark border-gray-800/80 hover:border-gray-700'
                     }`}
                   >
-                    <div className="relative w-28 aspect-video bg-darker rounded-xl overflow-hidden shrink-0 border border-gray-800">
+                    <div className="relative w-24 sm:w-28 aspect-video bg-darker rounded-lg overflow-hidden shrink-0 border border-gray-800">
                       <img
                         src={ep.thumbnail || currentVideo.thumbnail || "https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?q=80&w=800&auto=format&fit=crop"}
                         alt={ep.title}
                         className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
                       />
                       <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                        <PlayCircle className={`w-8 h-8 ${isPlaying ? 'text-primary' : 'text-white/80 group-hover:text-white'}`} />
+                        <PlayCircle className={`w-6 h-6 sm:w-7 sm:h-7 ${isPlaying ? 'text-primary' : 'text-white/80 group-hover:text-white'}`} />
                       </div>
                     </div>
 
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <h4 className={`font-bold text-sm truncate ${isPlaying ? 'text-primary' : 'text-white'}`} title={ep.title}>
-                          {ep.title || `Επεισόδιο ${epNum}`}
-                        </h4>
-                        {isPlaying && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 bg-primary text-white rounded-md animate-pulse shrink-0">
-                            ΤΩΡΑ
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-400 line-clamp-1" title={ep.description}>
-                        {ep.description || 'Greek Cartoons High Quality Stream'}
-                      </p>
+                    <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                      <h4 className={`font-bold text-xs sm:text-sm truncate ${isPlaying ? 'text-primary' : 'text-white'}`} title={ep.title}>
+                        {ep.title || `Επεισόδιο ${epNum}`}
+                      </h4>
+                      {isPlaying && (
+                        <span className="text-[10px] font-black px-2 py-0.5 bg-primary text-white rounded-md animate-pulse shrink-0">
+                          ΤΩΡΑ
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
@@ -330,3 +466,4 @@ export default function VideoPlayer() {
     </div>
   );
 }
+

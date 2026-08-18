@@ -1,6 +1,6 @@
 {
-  "name": "Greek Cartoons",
-  "description": "Παιδικά Greek cartoons streaming app με πληρωμή σε Monero.",
+  "name": "Greek streaming",
+  "description": "Greek streaming platform για ταινίες, σειρές και παιδικά με ασφάλεια Monero.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

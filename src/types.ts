@@ -13,10 +13,15 @@ export interface Video {
   description: string;
   url: string;
   thumbnail: string;
+  backdrop?: string;
   type: "movie" | "series";
   year?: string;
   episodes?: Episode[];
+  category?: "gctunes" | "greek_streaming";
+  genres?: string[];
 }
+
+export type LibraryAccessType = "gctunes" | "greek_streaming" | "both";
 
 export interface PriceResponse {
   price: number;
@@ -35,5 +40,6 @@ export interface VerifyResponse {
 export interface LoginResponse {
   success: boolean;
   isAdmin: boolean;
+  libraryAccess?: LibraryAccessType;
   error?: string;
 }
