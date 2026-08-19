@@ -19,6 +19,8 @@ import {
 import Hls from 'hls.js';
 import type { Video } from '../types';
 import AppBar from '../components/AppBar';
+import { updateScreenRecordingProtection } from '../utils/securityBridge';
+import { isNativeAppEnvironment } from '../utils/appEnvironment';
 
 export default function VideoPlayer() {
   const location = useLocation();
@@ -41,8 +43,8 @@ export default function VideoPlayer() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    if (!initialVideo) {
-      navigate('/dashboard');
+    if (!isNativeAppEnvironment() || !initialVideo) {
+      navigate('/login', { replace: true });
     }
   }, [initialVideo, navigate]);
 
@@ -173,8 +175,19 @@ export default function VideoPlayer() {
     };
   }, [activeUrl]);
 
-  // Anti-Screen Recording & Protection Listeners
+  // Anti-Screen Recording & Protection Listeners (Enforced for regular users, relaxed for Admin)
   useEffect(() => {
+    const isUserAdmin = localStorage.getItem('isAdmin') === 'true';
+    const isReadOnly = localStorage.getItem('isReadOnlyAdmin') === 'true';
+    const isSuperAdmin = isUserAdmin && !isReadOnly;
+
+    // Trigger Native Bridge (webtoapp / median / capacitor / android)
+    updateScreenRecordingProtection(isSuperAdmin);
+
+    if (isSuperAdmin) {
+      return; // Super Admin is allowed full screen recording & screenshots
+    }
+
     const handleContext = (e: Event) => e.preventDefault();
 
     const handleKeydown = (e: KeyboardEvent) => {

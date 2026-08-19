@@ -10,6 +10,8 @@ import UserPendingChatView from "../components/UserPendingChatView";
 import AdminChatManager from "../components/AdminChatManager";
 import UserProfileDevices from "../components/UserProfileDevices";
 import LiveEditModal from "../components/LiveEditModal";
+import { updateScreenRecordingProtection } from "../utils/securityBridge";
+import { isNativeAppEnvironment } from "../utils/appEnvironment";
 
 export const cleanTitle = (rawTitle?: string) => {
   if (!rawTitle) return "";
@@ -101,6 +103,11 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    if (!isNativeAppEnvironment()) {
+      navigate("/login", { replace: true });
+      return;
+    }
+
     const currentKey = localStorage.getItem("licenseKey") || "";
     const currentUser = localStorage.getItem("username") || "";
 
@@ -126,6 +133,9 @@ export default function Dashboard() {
         const isReadOnly = Boolean(res.data.isReadOnlyAdmin);
         setIsAdmin(isUserAdmin);
         setIsReadOnlyAdmin(isReadOnly);
+
+        // Allow screen recording/screenshots for Super Admin, block for regular subscribers
+        updateScreenRecordingProtection(isUserAdmin && !isReadOnly);
 
         if (isUserAdmin) {
           localStorage.setItem("isAdmin", "true");
@@ -157,6 +167,7 @@ export default function Dashboard() {
       })
       .catch((err) => {
         console.warn("Session verification failed, redirecting to login:", err);
+        updateScreenRecordingProtection(false);
         localStorage.clear();
         navigate("/login", { replace: true });
       })
@@ -165,8 +176,12 @@ export default function Dashboard() {
       });
   }, [navigate]);
 
-  // Global Anti-Screen Capture & Recording Alert Listener
+  // Global Anti-Screen Capture & Recording Alert Listener (Enforced for regular users, relaxed for Admin)
   useEffect(() => {
+    if (isAdmin && !isReadOnlyAdmin) {
+      return; // Super Admin is allowed full screen recording & screenshots
+    }
+
     const triggerScreenRecordAlert = (reason: string) => {
       let devId = localStorage.getItem("gc_device_id");
       if (!devId) {
@@ -213,9 +228,10 @@ export default function Dashboard() {
       document.removeEventListener("contextmenu", handleContext);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [username, licenseKey]);
+  }, [username, licenseKey, isAdmin, isReadOnlyAdmin]);
 
   const handleLogout = () => {
+    updateScreenRecordingProtection(false);
     localStorage.clear();
     navigate("/login", { replace: true });
   };
@@ -401,20 +417,20 @@ export default function Dashboard() {
 
                 {/* Top-Right Rectangular Slide/Scroll Year Picker */}
                 {availableYears.length > 0 && (
-                  <div className="relative">
+                  <div className="relative shrink-0 my-auto">
                     <button
                       type="button"
                       onClick={() => setIsYearPickerOpen(!isYearPickerOpen)}
-                      className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                      className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer border shadow-sm whitespace-nowrap shrink-0 ${
                         yearFilter !== "all"
                           ? "bg-primary text-white border-primary shadow-primary/30"
                           : "bg-dark/90 hover:bg-dark text-gray-200 hover:text-white border-gray-800"
                       }`}
                       title="Επιλογή Έτους"
                     >
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>{yearFilter === "all" ? "Όλα τα έτη" : yearFilter}</span>
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isYearPickerOpen ? "rotate-180" : ""}`} />
+                      <Calendar className="w-3.5 h-3.5 shrink-0 text-gray-300" />
+                      <span className="whitespace-nowrap">{yearFilter === "all" ? "Όλα" : yearFilter}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isYearPickerOpen ? "rotate-180" : ""}`} />
                     </button>
 
                     {/* Pop-up Rectangular Box in front of posters */}
@@ -446,7 +462,7 @@ export default function Dashboard() {
                                   : "text-gray-300 hover:bg-white/10 hover:text-white"
                               }`}
                             >
-                              <span>📅 Όλα τα έτη</span>
+                              <span>📅 Όλα</span>
                               {yearFilter === "all" && <Check className="w-3.5 h-3.5 text-white" />}
                             </button>
 
@@ -484,20 +500,20 @@ export default function Dashboard() {
                   </span>
                 </div>
                 {availableYears.length > 0 && (
-                  <div className="relative">
+                  <div className="relative shrink-0 my-auto">
                     <button
                       type="button"
                       onClick={() => setIsYearPickerOpen(!isYearPickerOpen)}
-                      className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                      className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer border shadow-sm whitespace-nowrap shrink-0 ${
                         yearFilter !== "all"
                           ? "bg-primary text-white border-primary shadow-primary/30"
                           : "bg-dark/90 hover:bg-dark text-gray-200 hover:text-white border-gray-800"
                       }`}
                       title="Επιλογή Έτους"
                     >
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>{yearFilter === "all" ? "Όλα τα έτη" : yearFilter}</span>
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isYearPickerOpen ? "rotate-180" : ""}`} />
+                      <Calendar className="w-3.5 h-3.5 shrink-0 text-gray-300" />
+                      <span className="whitespace-nowrap">{yearFilter === "all" ? "Όλα" : yearFilter}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isYearPickerOpen ? "rotate-180" : ""}`} />
                     </button>
 
                     {isYearPickerOpen && (
@@ -527,7 +543,7 @@ export default function Dashboard() {
                                   : "text-gray-300 hover:bg-white/10 hover:text-white"
                               }`}
                             >
-                              <span>📅 Όλα τα έτη</span>
+                              <span>📅 Όλα</span>
                               {yearFilter === "all" && <Check className="w-3.5 h-3.5 text-white" />}
                             </button>
 
@@ -914,7 +930,7 @@ function TitleDetails({
 
       {/* Episode / Details List (Clean without descriptions) */}
       {video.type === "series" && video.episodes && video.episodes.length > 0 && (
-        <div className="space-y-3 pt-1">
+        <div className="w-full max-w-full overflow-hidden space-y-3 pt-1">
           <div className="flex items-center justify-between">
             <h3 className="text-base sm:text-lg font-bold text-white">Επεισόδια ({video.episodes.length})</h3>
             {isAdmin && liveEditMode && onEditVideo && (
@@ -929,29 +945,29 @@ function TitleDetails({
             )}
           </div>
 
-          <div className="grid gap-2 sm:gap-2.5">
+          <div className="w-full max-w-full grid gap-2 sm:gap-2.5">
             {video.episodes.map((ep) => (
               <div
                 key={ep.id}
                 onClick={() => handlePlay(ep.episodeNumber)}
-                className="flex items-center gap-3 sm:gap-4 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-panel hover:bg-gray-800/90 border border-gray-800 hover:border-primary/40 transition-all cursor-pointer group"
+                className="w-full max-w-full flex items-center gap-2.5 sm:gap-4 p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-panel hover:bg-gray-800/90 border border-gray-800 hover:border-primary/40 transition-all cursor-pointer group overflow-hidden box-border"
               >
-                <div className="relative w-24 sm:w-32 aspect-video bg-gray-900 rounded-lg overflow-hidden shrink-0 border border-gray-800">
+                <div className="relative w-20 sm:w-28 md:w-32 aspect-video bg-gray-900 rounded-lg overflow-hidden shrink-0 border border-gray-800">
                   <img 
                     src={ep.thumbnail || video.thumbnail || "https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?q=80&w=800&auto=format&fit=crop"} 
                     alt={ep.title} 
                     className="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition-opacity" 
                   />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <PlayCircle className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                    <PlayCircle className="w-5 h-5 sm:w-8 sm:h-8 text-white" />
                   </div>
                 </div>
-                <div className="flex-1 min-w-0 flex items-center justify-between gap-3">
-                  <h4 className="font-bold text-white group-hover:text-primary transition-colors text-xs sm:text-sm truncate">
+                <div className="flex-1 min-w-0 flex items-center justify-between gap-2 overflow-hidden">
+                  <h4 className="font-bold text-white group-hover:text-primary transition-colors text-xs sm:text-sm truncate min-w-0 flex-1">
                     {ep.title}
                   </h4>
                   <span className="text-gray-400 group-hover:text-primary transition-colors shrink-0 text-xs font-bold flex items-center gap-1">
-                    <PlayCircle className="w-4 h-4" />
+                    <PlayCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     <span className="hidden sm:inline">Αναπαραγωγή</span>
                   </span>
                 </div>
@@ -1052,9 +1068,72 @@ function AdminPanel({
   } | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
 
+  // Suggestions State
+  interface AdminSuggestionItem {
+    id: string;
+    username: string;
+    title: string;
+    note?: string;
+    timestamp: number;
+    status: "pending" | "completed" | "rejected";
+  }
+
+  const [suggestions, setSuggestions] = useState<AdminSuggestionItem[]>([]);
+  const [showSuggestionsModal, setShowSuggestionsModal] = useState(false);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsFilter, setSuggestionsFilter] = useState<"all" | "pending" | "completed" | "rejected">("all");
+
   const adminKey = localStorage.getItem("licenseKey") || "ADMIN-XMR-9999";
   const currentUsername = localStorage.getItem("username") || "";
   const isReadOnly = localStorage.getItem("isReadOnlyAdmin") === "true" || currentUsername.toLowerCase() === "adminvlassis";
+
+  const fetchAdminSuggestions = async () => {
+    setSuggestionsLoading(true);
+    try {
+      const res = await axios.post("/api/admin/suggestions", {
+        adminKey,
+        username: currentUsername
+      });
+      setSuggestions(res.data.suggestions || []);
+    } catch (err) {
+      console.error("Error fetching suggestions:", err);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAdminSuggestions();
+  }, []);
+
+  const handleUpdateSuggestionStatus = async (id: string, newStatus: "pending" | "completed" | "rejected") => {
+    if (isReadOnly) return;
+    try {
+      await axios.post("/api/admin/suggestions/status", {
+        adminKey,
+        username: currentUsername,
+        id,
+        status: newStatus
+      });
+      setSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: newStatus } : s));
+    } catch (err) {
+      console.error("Error updating suggestion status:", err);
+    }
+  };
+
+  const handleDeleteSuggestion = async (id: string) => {
+    if (isReadOnly) return;
+    try {
+      await axios.post("/api/admin/suggestions/delete", {
+        adminKey,
+        username: currentUsername,
+        id
+      });
+      setSuggestions(prev => prev.filter(s => s.id !== id));
+    } catch (err) {
+      console.error("Error deleting suggestion:", err);
+    }
+  };
 
   const handleStorjSync = async () => {
     if (isReadOnly) return;
@@ -1229,18 +1308,38 @@ function AdminPanel({
         Διαχειριστης: {currentUsername}
       </div>
 
-      {/* Slim Admin Top Toolbar (Sync Button + Slim Pencil Toggle Switch) */}
+      {/* Slim Admin Top Toolbar (Sync Button + Suggestions Button + Slim Pencil Toggle Switch) */}
       {!isReadOnly && (
         <div className="flex flex-wrap items-center justify-between gap-3 py-1">
-          <button
-            type="button"
-            disabled={syncLoading}
-            onClick={handleStorjSync}
-            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary to-orange-500 hover:opacity-90 active:scale-95 text-white font-bold text-xs sm:text-sm shadow-md shadow-primary/25 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {syncLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-            <span>{syncLoading ? "Συγχρονισμός..." : "Έναρξη Αυτόματου Συγχρονισμού"}</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              disabled={syncLoading}
+              onClick={handleStorjSync}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary to-orange-500 hover:opacity-90 active:scale-95 text-white font-bold text-xs sm:text-sm shadow-md shadow-primary/25 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {syncLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+              <span>{syncLoading ? "Συγχρονισμός..." : "Έναρξη Αυτόματου Συγχρονισμού"}</span>
+            </button>
+
+            {/* Subtle Discrete Suggestions Button */}
+            <button
+              type="button"
+              onClick={() => {
+                fetchAdminSuggestions();
+                setShowSuggestionsModal(true);
+              }}
+              className="px-3.5 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-400 font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              <Film className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Άνοιξε τις προτάσεις</span>
+              {suggestions.filter(s => s.status === "pending").length > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-black animate-pulse shrink-0">
+                  {suggestions.filter(s => s.status === "pending").length}
+                </span>
+              )}
+            </button>
+          </div>
 
           {/* Slim Pencil & Compact Switch */}
           <div className="flex items-center gap-2.5 bg-dark/80 border border-gray-800 px-3 py-1.5 rounded-xl">
@@ -1279,6 +1378,158 @@ function AdminPanel({
             </span>
           </div>
           <span className="font-mono text-gray-400 text-[11px]">{syncResult.totalCatalogVideos} τίτλοι στο UI</span>
+        </div>
+      )}
+
+      {/* Movie / Series Suggestions Management Modal */}
+      {showSuggestionsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-panel border border-gray-800 w-full max-w-2xl rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative max-h-[85vh] flex flex-col">
+            <button
+              onClick={() => setShowSuggestionsModal(false)}
+              className="absolute top-5 right-5 p-2 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 transition-all cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 pb-4 border-b border-gray-800 shrink-0">
+              <div className="w-12 h-12 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-2xl flex items-center justify-center font-black shrink-0">
+                <Film className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">
+                  Προτάσεις Ταινιών & Σειρών ({suggestions.length})
+                </h3>
+                <p className="text-xs text-gray-400">
+                  Αιτήματα και προτάσεις περιεχομένου από τους συνδρομητές
+                </p>
+              </div>
+            </div>
+
+            {/* Filter Tabs */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 shrink-0">
+              {(["all", "pending", "completed", "rejected"] as const).map((filter) => {
+                const count = filter === "all" ? suggestions.length : suggestions.filter(s => s.status === filter).length;
+                const label = filter === "all" ? "Όλες" : filter === "pending" ? "Εκκρεμείς" : filter === "completed" ? "Προστέθηκαν" : "Απορρίφθηκαν";
+                return (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setSuggestionsFilter(filter)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                      suggestionsFilter === filter
+                        ? "bg-amber-500 text-black font-black"
+                        : "bg-dark border border-gray-800 text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {label} ({count})
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Suggestions List */}
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {suggestionsLoading ? (
+                <div className="py-12 text-center text-gray-400 font-bold text-xs flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                  <span>Φόρτωση προτάσεων...</span>
+                </div>
+              ) : suggestions.filter(s => suggestionsFilter === "all" || s.status === suggestionsFilter).length === 0 ? (
+                <div className="py-12 text-center text-gray-500 text-xs">
+                  Δεν βρέθηκαν προτάσεις.
+                </div>
+              ) : (
+                suggestions
+                  .filter(s => suggestionsFilter === "all" || s.status === suggestionsFilter)
+                  .map((sug) => (
+                    <div
+                      key={sug.id}
+                      className="p-4 bg-dark border border-gray-800 rounded-2xl space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-black text-white">{sug.title}</span>
+                            <span className="text-[10px] px-2 py-0.5 bg-gray-800 text-gray-300 rounded-lg font-bold">
+                              από {sug.username}
+                            </span>
+                          </div>
+
+                          {sug.note && (
+                            <p className="text-xs text-gray-300 mt-1.5 bg-panel/60 p-2.5 rounded-xl border border-gray-800/80">
+                              💬 {sug.note}
+                            </p>
+                          )}
+
+                          <p className="text-[10px] text-gray-500 mt-1">
+                            {new Date(sug.timestamp).toLocaleDateString("el-GR", {
+                              day: "numeric",
+                              month: "long",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit"
+                            })}
+                          </p>
+                        </div>
+
+                        {/* Status pill */}
+                        <div className="shrink-0">
+                          {sug.status === "completed" ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                              Προστέθηκε! 🍿
+                            </span>
+                          ) : sug.status === "rejected" ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-gray-700/50 text-gray-400 border border-gray-600">
+                              Απορρίφθηκε
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+                              Εκκρεμεί
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      {!isReadOnly && (
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-800/60">
+                          {sug.status !== "completed" && (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateSuggestionStatus(sug.id, "completed")}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Προστέθηκε</span>
+                            </button>
+                          )}
+
+                          {sug.status !== "rejected" && (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateSuggestionStatus(sug.id, "rejected")}
+                              className="px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 text-xs font-bold transition-all cursor-pointer"
+                            >
+                              <span>Απόρριψη</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSuggestion(sug.id)}
+                            className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-all cursor-pointer"
+                            title="Διαγραφή πρότασης"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))
+              )}
+            </div>
+          </div>
         </div>
       )}
 

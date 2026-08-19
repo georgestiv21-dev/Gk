@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { User, Lock, Shield, RefreshCw, ArrowRight, UserPlus, LogIn, CheckCircle2 } from 'lucide-react';
+import { User, Lock, Shield, RefreshCw, ArrowRight, UserPlus, LogIn, CheckCircle2, Smartphone, ShieldAlert, Globe } from 'lucide-react';
 import Logo from '../components/Logo';
 import AppBar from '../components/AppBar';
+import { updateScreenRecordingProtection } from '../utils/securityBridge';
+import { isNativeAppEnvironment, getDeviceId } from '../utils/appEnvironment';
 
 export default function Login() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
@@ -13,19 +15,20 @@ export default function Login() {
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [autoChecking, setAutoChecking] = useState(true);
+  const [isNativeApp, setIsNativeApp] = useState(true);
 
   const navigate = useNavigate();
 
-  const getDeviceId = () => {
-    let devId = localStorage.getItem('gc_device_id');
-    if (!devId) {
-      devId = 'dev_' + Math.random().toString(36).substring(2, 11);
-      localStorage.setItem('gc_device_id', devId);
-    }
-    return devId;
-  };
-
   useEffect(() => {
+    // Check if the current environment is a verified APK / Native App
+    const isApp = isNativeAppEnvironment();
+    setIsNativeApp(isApp);
+
+    if (!isApp) {
+      setAutoChecking(false);
+      return;
+    }
+
     const isRemembered = localStorage.getItem('gc_remember_me') === 'true';
     const savedUser = localStorage.getItem('username');
     const savedKey = localStorage.getItem('licenseKey');
@@ -36,18 +39,22 @@ export default function Login() {
       axios.post('/api/user-status', { username: savedUser, licenseKey: savedKey, deviceId })
         .then(res => {
           if (res.data.status === 'active' || res.data.status === 'pending' || res.data.isAdmin) {
+            updateScreenRecordingProtection(false);
             navigate('/dashboard', { replace: true });
           } else {
+            updateScreenRecordingProtection(false);
             localStorage.removeItem('gc_remember_me');
             localStorage.removeItem('licenseKey');
             setAutoChecking(false);
           }
         })
         .catch(() => {
+          updateScreenRecordingProtection(false);
           localStorage.removeItem('gc_remember_me');
           setAutoChecking(false);
         });
     } else {
+      updateScreenRecordingProtection(false);
       // If not set to remember, remove any stored key so no automatic background login occurs
       if (!isRemembered) {
         localStorage.removeItem('licenseKey');
@@ -78,6 +85,7 @@ export default function Login() {
         });
 
         if (res.data.success) {
+          updateScreenRecordingProtection(false);
           if (rememberMe) {
             localStorage.setItem('gc_remember_me', 'true');
           } else {
@@ -113,14 +121,17 @@ export default function Login() {
           if (res.data.isAdmin) {
             localStorage.setItem('isAdmin', 'true');
             localStorage.setItem('isReadOnlyAdmin', res.data.isReadOnlyAdmin ? 'true' : 'false');
+            updateScreenRecordingProtection(!res.data.isReadOnlyAdmin);
           } else {
             localStorage.setItem('isAdmin', 'false');
             localStorage.setItem('isReadOnlyAdmin', 'false');
+            updateScreenRecordingProtection(false);
           }
           navigate('/dashboard');
         }
       }
     } catch (err: any) {
+      updateScreenRecordingProtection(false);
       setErrorMsg(err.response?.data?.error || 'Σφάλμα κατά την αυθεντικοποίηση. Παρακαλώ δοκιμάστε ξανά.');
     } finally {
       setLoading(false);
@@ -136,6 +147,50 @@ export default function Login() {
             <RefreshCw className="w-5 h-5 animate-spin text-primary" />
             <span>Έλεγχος αποθηκευμένης σύνδεσης...</span>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Security lockdown for standard web browsers
+  if (!isNativeApp) {
+    return (
+      <div className="min-h-screen bg-[#070b13] text-white flex flex-col items-center justify-center p-5 relative overflow-hidden select-none">
+        {/* Background Ambient Glow */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-red-600/10 rounded-full blur-[140px] pointer-events-none"></div>
+
+        <div className="w-full max-w-md bg-[#0e1626]/95 backdrop-blur-2xl p-8 rounded-3xl border border-red-500/30 shadow-2xl z-10 flex flex-col items-center text-center">
+          <div className="w-20 h-20 bg-red-500/10 border border-red-500/30 rounded-3xl flex items-center justify-center mb-6 text-red-400 shadow-inner">
+            <ShieldAlert className="w-10 h-10 animate-pulse" />
+          </div>
+
+          <Logo size="md" />
+
+          <h2 className="text-xl font-black text-white mt-5 mb-2">
+            Αποκλειστική Πρόσβαση μέσω Εφαρμογής
+          </h2>
+
+          <p className="text-xs text-gray-300 leading-relaxed mb-6 font-medium">
+            Η σύνδεση και η αναπαραγωγή περιεχομένου μέσω απλού web browser (Chrome, Edge, Firefox, Safari) έχουν <span className="text-red-400 font-bold">απενεργοποιηθεί</span> για λόγους ασφαλείας και προστασίας από καταγραφή οθόνης.
+          </p>
+
+          <div className="w-full bg-[#070b13] border border-gray-800/80 rounded-2xl p-4 mb-6 flex flex-col gap-3 text-left">
+            <div className="flex items-center gap-3">
+              <Smartphone className="w-5 h-5 text-primary shrink-0" />
+              <div>
+                <p className="text-xs font-bold text-white">Επίσημη Εφαρμογή APK</p>
+                <p className="text-[11px] text-gray-400">Android, Android TV, Google TV & FireStick</p>
+              </div>
+            </div>
+            <div className="border-t border-gray-800/60 pt-2.5 flex items-center gap-2 text-[11px] text-emerald-400 font-semibold">
+              <Shield className="w-4 h-4 shrink-0" />
+              <span>Ενεργή προστασία DRM & Anti-Screen Capture (FLAG_SECURE)</span>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-gray-500">
+            Παρακαλούμε ανοίξτε την εφαρμογή αποκλειστικά από την εγκατεστημένη εφαρμογή σας.
+          </p>
         </div>
       </div>
     );
@@ -269,9 +324,23 @@ export default function Login() {
             </form>
           </div>
 
-          <p className="text-xs text-gray-600 mt-6 text-center">
-            Greek Streaming Platform &bull; Protected & Encrypted
-          </p>
+          <div className="mt-6 pt-5 border-t border-gray-800/80 flex flex-col items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem("gc_studio_preview_mode", "landing");
+                navigate("/landing");
+              }}
+              className="w-full py-3 px-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 border border-blue-500/40 rounded-xl text-blue-300 hover:text-white text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg"
+            >
+              <Globe className="w-4 h-4 text-blue-400" />
+              <span>🌐 Προβολή Landing Page (Προσωρινό Κουμπί)</span>
+            </button>
+
+            <p className="text-[11px] text-gray-500 text-center">
+              Greek Streaming Platform &bull; Protected & Encrypted
+            </p>
+          </div>
         </div>
       </div>
     </div>

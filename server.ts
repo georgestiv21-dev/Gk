@@ -127,6 +127,17 @@ const userAccounts = new Map<string, UserAccount>();
 const userDevicesMap = new Map<string, ConnectedDevice[]>();
 const screenRecordAlertsMap = new Map<string, { count: number; lastAlert: number; details: string }>();
 
+export interface MovieSuggestion {
+  id: string;
+  username: string;
+  title: string;
+  note?: string;
+  timestamp: number;
+  status: "pending" | "completed" | "rejected";
+}
+
+let movieSuggestions: MovieSuggestion[] = [];
+
 // --- JSON Database Persistence ---
 const DB_FILE = path.join(process.cwd(), "database.json");
 
@@ -136,7 +147,8 @@ function saveDatabase() {
     userAccounts: Array.from(userAccounts.entries()),
     userDevicesMap: Array.from(userDevicesMap.entries()),
     screenRecordAlertsMap: Array.from(screenRecordAlertsMap.entries()),
-    videos: videos
+    videos: videos,
+    movieSuggestions: movieSuggestions
   };
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf8");
 }
@@ -160,6 +172,10 @@ function loadDatabase() {
       if (data.screenRecordAlertsMap) {
         screenRecordAlertsMap.clear();
         data.screenRecordAlertsMap.forEach(([k, v]) => screenRecordAlertsMap.set(k, v));
+      }
+      if (data.movieSuggestions && Array.isArray(data.movieSuggestions)) {
+        movieSuggestions.length = 0;
+        movieSuggestions.push(...data.movieSuggestions);
       }
       if (data.videos) {
         videos.length = 0;
@@ -1036,6 +1052,90 @@ app.post("/api/user/devices/delete", (req, res) => {
     deletedCurrent: isCurrentDeleted,
     message: isCurrentDeleted ? "Αποσυνδεθήκατε από αυτή τη συσκευή." : "Η συσκευή αφαιρέθηκε επιτυχώς."
   });
+});
+
+// User: Submit Movie / Series Suggestion
+app.post("/api/user/suggestions", (req, res) => {
+  const { username = "", licenseKey = "", title = "", note = "" } = req.body;
+  const cleanUsername = (username || "").trim();
+  const cleanTitle = (title || "").trim();
+
+  if (!cleanTitle) {
+    return res.status(400).json({ error: "Παρακαλούμε εισάγετε τον τίτλο της ταινίας ή σειράς." });
+  }
+
+  const newSuggestion: MovieSuggestion = {
+    id: uuidv4(),
+    username: cleanUsername || "Χρήστης",
+    title: cleanTitle,
+    note: (note || "").trim(),
+    timestamp: Date.now(),
+    status: "pending"
+  };
+
+  movieSuggestions.unshift(newSuggestion);
+  saveDatabase();
+
+  res.json({
+    success: true,
+    message: "Η πρότασή σας στάλθηκε με επιτυχία!",
+    suggestion: newSuggestion
+  });
+});
+
+// User: Get My Suggestions
+app.post("/api/user/suggestions/my", (req, res) => {
+  const { username = "" } = req.body;
+  const cleanUsername = (username || "").trim().toLowerCase();
+
+  const userSuggestions = movieSuggestions.filter(
+    s => s.username.trim().toLowerCase() === cleanUsername
+  );
+
+  res.json({ success: true, suggestions: userSuggestions });
+});
+
+// Admin: Get All Movie/Series Suggestions
+app.post("/api/admin/suggestions", (req, res) => {
+  const { adminKey = "", username = "" } = req.body;
+  if (!isAdminKey(adminKey) && !isAdminKey(username) && !isReadOnlyAdminKey(adminKey) && !isReadOnlyAdminKey(username)) {
+    return res.status(403).json({ error: "Δεν έχετε δικαιώματα διαχειριστή." });
+  }
+
+  res.json({ success: true, suggestions: movieSuggestions });
+});
+
+// Admin: Update Suggestion Status
+app.post("/api/admin/suggestions/status", (req, res) => {
+  const { adminKey = "", username = "", id = "", status = "pending" } = req.body;
+  if (!isAdminKey(adminKey) && !isAdminKey(username)) {
+    return res.status(403).json({ error: "Δεν έχετε δικαιώματα διαχειριστή." });
+  }
+
+  const suggestion = movieSuggestions.find(s => s.id === id);
+  if (!suggestion) {
+    return res.status(404).json({ error: "Η πρόταση δεν βρέθηκε." });
+  }
+
+  if (["pending", "completed", "rejected"].includes(status)) {
+    suggestion.status = status as "pending" | "completed" | "rejected";
+    saveDatabase();
+  }
+
+  res.json({ success: true, suggestion });
+});
+
+// Admin: Delete Suggestion
+app.post("/api/admin/suggestions/delete", (req, res) => {
+  const { adminKey = "", username = "", id = "" } = req.body;
+  if (!isAdminKey(adminKey) && !isAdminKey(username)) {
+    return res.status(403).json({ error: "Δεν έχετε δικαιώματα διαχειριστή." });
+  }
+
+  movieSuggestions = movieSuggestions.filter(s => s.id !== id);
+  saveDatabase();
+
+  res.json({ success: true, message: "Η πρόταση διαγράφηκε." });
 });
 
 // 2. Admin: Approve User (Set/Reset access duration to specified days & assign library access)
@@ -2751,6 +2851,36 @@ app.delete("/api/videos/:id", async (req, res) => {
 
   console.log(`[Admin Live Edit] Successfully deleted video "${removedTitle}" (${id})`);
   return res.json({ success: true, message: `Ο τίτλος "${removedTitle}" διαγράφηκε επιτυχώς.` });
+});
+
+// 9. APK Download Endpoints
+app.get(["/api/download/greek-streaming.apk", "/api/download-apk", "/downloads/greek-streaming.apk", "/downloads/GreekStreaming.apk"], (req, res) => {
+  const possiblePaths = [
+    path.join(process.cwd(), "public", "downloads", "greek-streaming.apk"),
+    path.join(process.cwd(), "public", "downloads", "GreekStreaming.apk"),
+    path.join(process.cwd(), "downloads", "greek-streaming.apk"),
+    path.join(process.cwd(), "downloads", "GreekStreaming.apk"),
+    path.join(process.cwd(), "public", "greek-streaming.apk"),
+    path.join(process.cwd(), "public", "GreekStreaming.apk"),
+  ];
+
+  for (const apkPath of possiblePaths) {
+    if (fs.existsSync(apkPath)) {
+      res.setHeader("Content-Disposition", 'attachment; filename="GreekStreaming.apk"');
+      res.setHeader("Content-Type", "application/vnd.android.package-archive");
+      return res.sendFile(apkPath);
+    }
+  }
+
+  // If no physical APK has been uploaded yet, inform the user or trigger fallback download
+  res.setHeader("Content-Disposition", 'attachment; filename="GreekStreaming-Setup.txt"');
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  return res.send(
+    "Greek Streaming APK\n\n" +
+    "Για να ενεργοποιήσετε το άμεσο download του αρχείου APK:\n" +
+    "Τοποθετήστε το compiled αρχείο .apk στον φάκελο public/downloads/greek-streaming.apk στον VPS server σας.\n\n" +
+    "Επίσημο site: https://greek-streaming.com"
+  );
 });
 
 // --- VITE MIDDLEWARE FOR DEVELOPMENT / STATIC SERVING FOR PRODUCTION ---

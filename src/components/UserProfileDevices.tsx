@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { User, Smartphone, Laptop, Tv, Globe, Trash2, RefreshCw, CheckCircle2, LogOut, ShieldAlert, AlertTriangle } from "lucide-react";
+import { User, Smartphone, Laptop, Tv, Globe, Trash2, RefreshCw, CheckCircle2, LogOut, Film, Send, Clock, XCircle } from "lucide-react";
 
 interface ConnectedDevice {
   deviceId: string;
@@ -8,6 +8,15 @@ interface ConnectedDevice {
   ip: string;
   lastActive: number;
   isCurrent?: boolean;
+}
+
+interface UserSuggestion {
+  id: string;
+  username: string;
+  title: string;
+  note?: string;
+  timestamp: number;
+  status: "pending" | "completed" | "rejected";
 }
 
 interface UserProfileDevicesProps {
@@ -21,6 +30,15 @@ export default function UserProfileDevices({ username, licenseKey, onLogout }: U
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  // Movie / Series Suggestion State
+  const [suggestionTitle, setSuggestionTitle] = useState("");
+  const [suggestionNote, setSuggestionNote] = useState("");
+  const [submittingSuggestion, setSubmittingSuggestion] = useState(false);
+  const [suggestionSuccess, setSuggestionSuccess] = useState<string | null>(null);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  const [userSuggestions, setUserSuggestions] = useState<UserSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   const getDeviceId = () => {
     let devId = localStorage.getItem("gc_device_id");
@@ -47,9 +65,56 @@ export default function UserProfileDevices({ username, licenseKey, onLogout }: U
     }
   };
 
+  const fetchMySuggestions = async () => {
+    setLoadingSuggestions(true);
+    try {
+      const res = await axios.post("/api/user/suggestions/my", { username });
+      setUserSuggestions(res.data.suggestions || []);
+    } catch (err) {
+      console.error("Error fetching suggestions:", err);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  };
+
   useEffect(() => {
     fetchDevices();
+    fetchMySuggestions();
   }, [username, licenseKey]);
+
+  const handleSubmitSuggestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!suggestionTitle.trim()) {
+      setSuggestionError("Παρακαλούμε πληκτρολογήστε τον τίτλο της ταινίας ή της σειράς.");
+      return;
+    }
+
+    setSubmittingSuggestion(true);
+    setSuggestionError(null);
+    setSuggestionSuccess(null);
+
+    try {
+      const res = await axios.post("/api/user/suggestions", {
+        username,
+        licenseKey,
+        title: suggestionTitle.trim(),
+        note: suggestionNote.trim()
+      });
+
+      setSuggestionSuccess("Η πρότασή σας στάλθηκε επιτυχώς στον διαχειριστή!");
+      setSuggestionTitle("");
+      setSuggestionNote("");
+      fetchMySuggestions();
+
+      setTimeout(() => {
+        setSuggestionSuccess(null);
+      }, 4000);
+    } catch (err: any) {
+      setSuggestionError(err.response?.data?.error || "Αποτυχία υποβολής της πρότασης.");
+    } finally {
+      setSubmittingSuggestion(false);
+    }
+  };
 
   const handleDeleteDevice = async (deviceIdToDelete: string, isCurrent?: boolean) => {
     if (!confirm(isCurrent ? "Είστε σίγουρος ότι θέλετε να αποσυνδεθείτε από αυτή τη συσκευή;" : "Είστε σίγουρος ότι θέλετε να διαγράψετε αυτή τη συσκευή;")) {
@@ -237,6 +302,118 @@ export default function UserProfileDevices({ username, licenseKey, onLogout }: U
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Suggest Movie or Series Card */}
+      <div className="p-6 bg-panel/90 backdrop-blur-xl border border-gray-800 rounded-3xl space-y-5 shadow-2xl">
+        <div className="flex items-center gap-3 pb-4 border-b border-gray-800">
+          <div className="w-10 h-10 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl flex items-center justify-center shrink-0">
+            <Film className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-base font-black text-white">Προτείνετε Ταινία ή Σειρά 🍿</h3>
+            <p className="text-xs text-gray-400">Γράψτε τον τίτλο που θέλετε να προστεθεί στην πλατφόρμα</p>
+          </div>
+        </div>
+
+        {suggestionSuccess && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+            <span>{suggestionSuccess}</span>
+          </div>
+        )}
+
+        {suggestionError && (
+          <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+            <XCircle className="w-4 h-4 shrink-0 text-rose-400" />
+            <span>{suggestionError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmitSuggestion} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-gray-300">Τίτλος Ταινίας / Σειράς:</label>
+            <input
+              type="text"
+              value={suggestionTitle}
+              onChange={(e) => setSuggestionTitle(e.target.value)}
+              placeholder="π.χ. Avatar 3, Peppa Pig, Breaking Bad S2..."
+              className="w-full px-4 py-2.5 bg-dark border border-gray-800 focus:border-amber-500/80 rounded-xl text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none transition-all"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-gray-300">Σχόλια / Σημεία Προτίμησης (Προαιρετικό):</label>
+            <input
+              type="text"
+              value={suggestionNote}
+              onChange={(e) => setSuggestionNote(e.target.value)}
+              placeholder="π.χ. Με ελληνική μεταγλώττιση, HD ποιότητα..."
+              className="w-full px-4 py-2.5 bg-dark border border-gray-800 focus:border-amber-500/80 rounded-xl text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none transition-all"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={submittingSuggestion || !suggestionTitle.trim()}
+            className="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-black text-xs sm:text-sm rounded-xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {submittingSuggestion ? (
+              <RefreshCw className="w-4 h-4 animate-spin text-black" />
+            ) : (
+              <Send className="w-4 h-4 text-black" />
+            )}
+            <span>{submittingSuggestion ? "Αποστολή..." : "Αποστολή Πρότασης"}</span>
+          </button>
+        </form>
+
+        {/* My Past Suggestions */}
+        {userSuggestions.length > 0 && (
+          <div className="pt-4 border-t border-gray-800/80 space-y-3">
+            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>Οι Προτάσεις μου ({userSuggestions.length})</span>
+            </h4>
+
+            <div className="space-y-2">
+              {userSuggestions.map((sug) => (
+                <div
+                  key={sug.id}
+                  className="p-3 bg-dark border border-gray-800 rounded-xl flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-white truncate">{sug.title}</p>
+                    {sug.note && <p className="text-[11px] text-gray-400 truncate mt-0.5">{sug.note}</p>}
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      {new Date(sug.timestamp).toLocaleDateString("el-GR", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })}
+                    </p>
+                  </div>
+
+                  <div className="shrink-0">
+                    {sug.status === "completed" ? (
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        Προστέθηκε! 🍿
+                      </span>
+                    ) : sug.status === "rejected" ? (
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-gray-700/50 text-gray-400 border border-gray-600">
+                        Απορρίφθηκε
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                        Εκκρεμεί ⏳
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
