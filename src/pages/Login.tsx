@@ -4,10 +4,12 @@ import axios from 'axios';
 import { User, Lock, Shield, RefreshCw, ArrowRight, UserPlus, LogIn, CheckCircle2, Smartphone, ShieldAlert } from 'lucide-react';
 import Logo from '../components/Logo';
 import AppBar from '../components/AppBar';
+import SplashScreen from '../components/SplashScreen';
 import { updateScreenRecordingProtection } from '../utils/securityBridge';
 import { isNativeAppEnvironment, getDeviceId } from '../utils/appEnvironment';
 
 export default function Login() {
+  const [showSplash, setShowSplash] = useState(true);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -137,6 +139,10 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  if (showSplash) {
+    return <SplashScreen onComplete={() => setShowSplash(false)} minDurationMs={1800} />;
+  }
 
   if (autoChecking) {
     return (
