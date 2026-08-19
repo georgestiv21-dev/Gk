@@ -9,7 +9,6 @@ import {
   Copy, 
   Check, 
   Lock, 
-  MonitorPlay,
   ExternalLink,
   Tv2,
   ChevronDown,
@@ -21,12 +20,7 @@ import {
 } from 'lucide-react';
 import Logo from '../components/Logo';
 
-interface LandingPageProps {
-  onTogglePreviewMode?: () => void;
-  isPreviewingApp?: boolean;
-}
-
-export default function LandingPage({ onTogglePreviewMode, isPreviewingApp }: LandingPageProps) {
+export default function LandingPage() {
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [activeTab, setActiveTab] = useState<'tv' | 'phone'>('tv');
   const [openFaq, setOpenFaq] = useState<number | null>(null);
@@ -396,18 +390,6 @@ export default function LandingPage({ onTogglePreviewMode, isPreviewingApp }: La
           <p className="text-[11px] text-gray-400">
             Μεταγλωττισμένα Παιδικά & Ταινίες με Ελληνικούς Υπότιτλους
           </p>
-
-          {/* Studio Switch Button */}
-          {onTogglePreviewMode && (
-            <button
-              type="button"
-              onClick={onTogglePreviewMode}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary/15 border border-primary/30 text-primary hover:bg-primary/25 text-xs font-bold transition-all cursor-pointer"
-            >
-              <MonitorPlay className="w-3.5 h-3.5" />
-              <span>Εναλλαγή σε Εφαρμογή (Login)</span>
-            </button>
-          )}
         </div>
       </footer>
 

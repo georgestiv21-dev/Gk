@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { User, Lock, Shield, RefreshCw, ArrowRight, UserPlus, LogIn, CheckCircle2, Smartphone, ShieldAlert, Globe } from 'lucide-react';
+import { User, Lock, Shield, RefreshCw, ArrowRight, UserPlus, LogIn, CheckCircle2, Smartphone, ShieldAlert } from 'lucide-react';
 import Logo from '../components/Logo';
 import AppBar from '../components/AppBar';
 import { updateScreenRecordingProtection } from '../utils/securityBridge';
@@ -324,19 +324,7 @@ export default function Login() {
             </form>
           </div>
 
-          <div className="mt-6 pt-5 border-t border-gray-800/80 flex flex-col items-center gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.setItem("gc_studio_preview_mode", "landing");
-                navigate("/landing");
-              }}
-              className="w-full py-3 px-4 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 border border-blue-500/40 rounded-xl text-blue-300 hover:text-white text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg"
-            >
-              <Globe className="w-4 h-4 text-blue-400" />
-              <span>🌐 Προβολή Landing Page (Προσωρινό Κουμπί)</span>
-            </button>
-
+          <div className="mt-6 pt-5 border-t border-gray-800/80 flex flex-col items-center gap-2">
             <p className="text-[11px] text-gray-500 text-center">
               Greek Streaming Platform &bull; Protected & Encrypted
             </p>
