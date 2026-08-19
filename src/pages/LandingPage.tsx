@@ -6,10 +6,7 @@ import {
   ShieldCheck, 
   Sparkles, 
   ArrowDownCircle, 
-  Copy, 
-  Check, 
   Lock, 
-  ExternalLink,
   Tv2,
   ChevronDown,
   Subtitles,
@@ -21,19 +18,11 @@ import {
 import Logo from '../components/Logo';
 
 export default function LandingPage() {
-  const [copiedUrl, setCopiedUrl] = useState(false);
   const [activeTab, setActiveTab] = useState<'tv' | 'phone'>('tv');
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   // Direct APK links
   const apkDownloadPath = '/downloads/greek-streaming.apk';
-  const fullApkUrl = 'https://greek-streaming.com/downloads/greek-streaming.apk';
-
-  const copyDownloaderText = () => {
-    navigator.clipboard.writeText(fullApkUrl);
-    setCopiedUrl(true);
-    setTimeout(() => setCopiedUrl(false), 2000);
-  };
 
   const toggleFaq = (index: number) => {
     setOpenFaq(openFaq === index ? null : index);
@@ -49,8 +38,8 @@ export default function LandingPage() {
       a: 'Ναι! Όλες οι ξένες ταινίες, blockbusters και δημοφιλείς σειρές συνοδεύονται από απόλυτα συγχρονισμένους ελληνικούς υπότιτλους υψηλής ευκρίνειας.'
     },
     {
-      q: 'Πώς κάνω εγκατάσταση στην Smart TV ή στο Amazon FireStick;',
-      a: 'Ανοίγετε την εφαρμογή Downloader στην τηλεόρασή σας, πληκτρολογείτε τη διεύθυνση https://greek-streaming.com/downloads/greek-streaming.apk, πατάτε Go και ολοκληρώνετε την εγκατάσταση σε 1 λεπτό.'
+      q: 'Πώς κάνω εγκατάσταση στην Smart TV ή στο Android TV Box;',
+      a: 'Κατεβάζετε το APK στο κινητό σας και το στέλνετε απευθείας στην τηλεόρασή σας μέσα σε λίγα δευτερόλεπτα με τη δωρεάν εφαρμογή Send Files to TV (SFTV).'
     },
     {
       q: 'Γιατί η πρόσβαση γίνεται μόνο μέσω της εφαρμογής APK;',
@@ -120,36 +109,6 @@ export default function LandingPage() {
             <ArrowDownCircle className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0 group-hover:scale-110 transition-transform" />
             <span>Κατεβάστε Επίσημα το APK</span>
           </a>
-
-          {/* Minimalist Downloader Link Field for Smart TV */}
-          <div className="w-full flex flex-col items-center gap-1.5 pt-0.5">
-            <span className="text-[10px] sm:text-xs text-gray-400 font-medium flex items-center gap-1">
-              <Tv className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span>Σύνδεσμος Downloader για Smart TV & FireStick:</span>
-            </span>
-
-            <div className="w-full flex items-center gap-1.5 bg-[#0f1117]/90 border border-white/10 hover:border-primary/40 rounded-xl p-1.5 transition-all min-w-0 shadow-inner backdrop-blur-md">
-              <a 
-                href={apkDownloadPath}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline font-mono text-[11px] font-semibold flex-1 min-w-0 truncate flex items-center gap-1 pl-2 text-left"
-                title="Πατήστε για άμεση λήψη"
-              >
-                <span className="truncate">{fullApkUrl}</span>
-                <ExternalLink className="w-3 h-3 shrink-0 opacity-60" />
-              </a>
-              
-              <button
-                type="button"
-                onClick={copyDownloaderText}
-                className="px-2.5 py-1 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/35 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all shrink-0 cursor-pointer active:scale-95"
-              >
-                {copiedUrl ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedUrl ? 'Copied' : 'Copy'}</span>
-              </button>
-            </div>
-          </div>
 
           <div className="flex items-center justify-center gap-1 text-[10px] text-gray-400 opacity-80 pt-0.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -288,41 +247,57 @@ export default function LandingPage() {
         {/* Tab Content */}
         <div className="bg-[#1a1d24] border border-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-8 shadow-xl">
           {activeTab === 'tv' ? (
-            <div className="space-y-4 sm:space-y-5">
-              <div className="flex items-start gap-3 sm:gap-4">
-                <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-primary/30">1</span>
-                <div>
-                  <h4 className="font-bold text-white text-xs sm:text-sm">Κατεβάστε την εφαρμογή Downloader</h4>
-                  <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">Ανοίξτε το Google Play Store ή το Amazon Appstore στην τηλεόρασή σας και κατεβάστε τη δωρεάν εφαρμογή <b>Downloader by AFTVnews</b>.</p>
+            <div className="space-y-5">
+              {/* Badge Method */}
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-white/10 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-black uppercase">
+                    ⭐ Προτεινόμενος Τρόπος
+                  </span>
+                  <span className="text-xs font-bold text-white">Ασύρματη Μεταφορά από το Κινητό</span>
                 </div>
+                <span className="text-[11px] text-gray-400">Χωρίς πληκτρολόγηση στην τηλεόραση</span>
               </div>
 
-              <div className="flex items-start gap-3 sm:gap-4">
-                <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-primary/30">2</span>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-bold text-white text-xs sm:text-sm">Πληκτρολογήστε τη διεύθυνση λήψης</h4>
-                  <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5 mb-2">Στο πεδίο URL του Downloader πληκτρολογήστε το σύνδεσμο:</p>
-                  
-                  <div className="flex items-center gap-2 bg-[#090a0c] border border-primary/40 rounded-xl p-2 min-w-0 max-w-md">
-                    <code className="text-primary font-mono text-[11px] font-bold flex-1 truncate min-w-0">
-                      {fullApkUrl}
-                    </code>
-                    <button
-                      onClick={copyDownloaderText}
-                      className="px-2.5 py-1 bg-primary/20 hover:bg-primary/30 text-primary rounded-lg text-xs font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
-                    >
-                      {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span className="text-[11px]">{copiedUrl ? 'OK' : 'Copy'}</span>
-                    </button>
+              <div className="space-y-4 sm:space-y-5">
+                <div className="flex items-start gap-3 sm:gap-4">
+                  <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-emerald-500/30">1</span>
+                  <div>
+                    <h4 className="font-bold text-white text-xs sm:text-sm">Κατεβάστε το APK στο Κινητό σας</h4>
+                    <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">
+                      Πατήστε το κουμπί <b>«Κατεβάστε Επίσημα το APK»</b> πιο πάνω από το κινητό σας τηλέφωνο.
+                    </p>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex items-start gap-3 sm:gap-4">
-                <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-primary/30">3</span>
-                <div>
-                  <h4 className="font-bold text-white text-xs sm:text-sm">Εγκατάσταση & Σύνδεση</h4>
-                  <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">Μόλις ολοκληρωθεί η λήψη, πατήστε <b>Install</b>, ανοίξτε την εφαρμογή και συνδεθείτε.</p>
+                <div className="flex items-start gap-3 sm:gap-4">
+                  <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-emerald-500/30">2</span>
+                  <div>
+                    <h4 className="font-bold text-white text-xs sm:text-sm">Εγκαταστήστε την εφαρμογή «Send Files to TV»</h4>
+                    <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">
+                      Κατεβάστε τη δωρεάν εφαρμογή <b>Send Files to TV (SFTV)</b> από το Google Play Store τόσο στο <b>κινητό</b> όσο και στην <b>Smart TV / Android TV</b> σας.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 sm:gap-4">
+                  <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-emerald-500/30">3</span>
+                  <div>
+                    <h4 className="font-bold text-white text-xs sm:text-sm">Αποστολή (Send) στην Τηλεόραση</h4>
+                    <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">
+                      Στην TV επιλέξτε <b>Receive</b>. Στο κινητό επιλέξτε <b>Send</b>, επιλέξτε το αρχείο <code>greek-streaming.apk</code> (από τον φάκελο Downloads/Λήψεις) και πατήστε το όνομα της τηλεόρασής σας.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 sm:gap-4">
+                  <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-emerald-500/30">4</span>
+                  <div>
+                    <h4 className="font-bold text-white text-xs sm:text-sm">Εγκατάσταση (Install) & Έναρξη</h4>
+                    <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">
+                      Μόλις ολοκληρωθεί η μεταφορά στην TV (σε 3-5 δευτερόλεπτα), πατήστε πάνω στο αρχείο και επιλέξτε <b>Open / Install</b> για να συνδεθείτε!
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

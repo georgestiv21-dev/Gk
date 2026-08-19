@@ -261,6 +261,20 @@ export default function Dashboard() {
     return true;
   };
 
+  // Helper to extract year from either v.year or title string
+  const getVideoYear = (v: { year?: string | number; title?: string }) => {
+    if (v.year) {
+      const yrStr = String(v.year).trim();
+      const match = yrStr.match(/\b(19\d\d|20\d\d)\b/);
+      if (match) return match[1];
+    }
+    if (v.title) {
+      const match = v.title.match(/\b(19\d\d|20\d\d)\b/);
+      if (match) return match[1];
+    }
+    return "";
+  };
+
   // Base accessible videos matching active category & type tab
   const baseCategoryVideos = videos
     .filter(isVideoAccessible)
@@ -270,11 +284,11 @@ export default function Dashboard() {
       return true;
     });
 
-  // Dynamically extract all available years ONLY present in this category/subset
+  // Dynamically extract ONLY years that actually exist in the current filtered material/posters
   const availableYears = Array.from(
     new Set(
       baseCategoryVideos
-        .map((v) => (v.year ? String(v.year).trim() : ""))
+        .map((v) => getVideoYear(v))
         .filter((y) => /^\d{4}$/.test(y))
     )
   ).sort((a, b) => Number(b) - Number(a));
@@ -289,7 +303,8 @@ export default function Dashboard() {
   const displayedVideos = baseCategoryVideos
     .filter((v) => {
       if (yearFilter === "all") return true;
-      return String(v.year || "").trim() === yearFilter;
+      const vYear = getVideoYear(v);
+      return vYear === yearFilter;
     })
     .reverse();
 
@@ -415,58 +430,58 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Top-Right Rectangular Slide/Scroll Year Picker */}
-                {availableYears.length > 0 && (
-                  <div className="relative shrink-0 my-auto">
-                    <button
-                      type="button"
-                      onClick={() => setIsYearPickerOpen(!isYearPickerOpen)}
-                      className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer border shadow-sm whitespace-nowrap shrink-0 ${
-                        yearFilter !== "all"
-                          ? "bg-primary text-white border-primary shadow-primary/30"
-                          : "bg-dark/90 hover:bg-dark text-gray-200 hover:text-white border-gray-800"
-                      }`}
-                      title="Επιλογή Έτους"
-                    >
-                      <Calendar className="w-3.5 h-3.5 shrink-0 text-gray-300" />
-                      <span className="whitespace-nowrap">{yearFilter === "all" ? "Όλα" : yearFilter}</span>
-                      <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isYearPickerOpen ? "rotate-180" : ""}`} />
-                    </button>
+                {/* Top-Right Rectangular Slide/Scroll Year Picker - Always Visible */}
+                <div className="relative shrink-0 my-auto">
+                  <button
+                    type="button"
+                    onClick={() => setIsYearPickerOpen(!isYearPickerOpen)}
+                    className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer border shadow-sm whitespace-nowrap shrink-0 ${
+                      yearFilter !== "all"
+                        ? "bg-primary text-white border-primary shadow-primary/30"
+                        : "bg-dark/80 hover:bg-dark text-gray-400 hover:text-white border-white/5"
+                    }`}
+                    title="Επιλογή Χρονολογίας"
+                  >
+                    <Calendar className="w-3.5 h-3.5 shrink-0 text-primary" />
+                    <span className="whitespace-nowrap">{yearFilter === "all" ? "Χρονολογία" : yearFilter}</span>
+                    <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isYearPickerOpen ? "rotate-180" : ""}`} />
+                  </button>
 
-                    {/* Pop-up Rectangular Box in front of posters */}
-                    {isYearPickerOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-[105]"
-                          onClick={() => setIsYearPickerOpen(false)}
-                        />
-                        <div className="absolute right-0 top-full mt-2 w-52 sm:w-60 bg-[#0f1117] border border-gray-700/80 rounded-2xl shadow-2xl z-[110] p-2.5 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10">
-                          <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-white/10 mb-1.5 text-[11px] font-black text-gray-400">
-                            <span>Χρονολογία</span>
-                            <span className="text-[10px] font-mono text-primary font-bold">
-                              {yearFilter === "all" ? "Όλα" : yearFilter}
-                            </span>
-                          </div>
+                  {/* Pop-up Rectangular Box in front of posters */}
+                  {isYearPickerOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-[105]"
+                        onClick={() => setIsYearPickerOpen(false)}
+                      />
+                      <div className="absolute right-0 top-full mt-2 w-52 sm:w-60 bg-[#0f1117] border border-gray-700/80 rounded-2xl shadow-2xl z-[110] p-2.5 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10">
+                        <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-white/10 mb-1.5 text-[11px] font-black text-gray-400">
+                          <span>Χρονολογία</span>
+                          <span className="text-[10px] font-mono text-primary font-bold">
+                            {yearFilter === "all" ? "Όλες" : yearFilter}
+                          </span>
+                        </div>
 
-                          {/* Scrollable / Slide list up and down */}
-                          <div className="max-h-60 sm:max-h-72 overflow-y-auto space-y-1 pr-1 overscroll-contain scrollbar-thin">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setYearFilter("all");
-                                setIsYearPickerOpen(false);
-                              }}
-                              className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold text-left transition-all flex items-center justify-between cursor-pointer ${
-                                yearFilter === "all"
-                                  ? "bg-primary text-white shadow-sm shadow-primary/30"
-                                  : "text-gray-300 hover:bg-white/10 hover:text-white"
-                              }`}
-                            >
-                              <span>📅 Όλα</span>
-                              {yearFilter === "all" && <Check className="w-3.5 h-3.5 text-white" />}
-                            </button>
+                        {/* Scrollable / Slide list up and down */}
+                        <div className="max-h-60 sm:max-h-72 overflow-y-auto space-y-1 pr-1 overscroll-contain scrollbar-thin">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setYearFilter("all");
+                              setIsYearPickerOpen(false);
+                            }}
+                            className={`w-full px-3 py-2 rounded-xl text-xs font-black text-left transition-all flex items-center justify-between cursor-pointer ${
+                              yearFilter === "all"
+                                ? "bg-primary text-white shadow-sm shadow-primary/30"
+                                : "text-gray-300 hover:bg-white/10 hover:text-white"
+                            }`}
+                          >
+                            <span>📅 Όλες οι χρονολογίες</span>
+                            {yearFilter === "all" && <Check className="w-3.5 h-3.5 text-white" />}
+                          </button>
 
-                            {availableYears.map((yr) => (
+                          {availableYears.length > 0 ? (
+                            availableYears.map((yr) => (
                               <button
                                 key={yr}
                                 type="button"
@@ -474,7 +489,7 @@ export default function Dashboard() {
                                   setYearFilter(yr);
                                   setIsYearPickerOpen(false);
                                 }}
-                                className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold text-left transition-all flex items-center justify-between cursor-pointer ${
+                                className={`w-full px-3 py-2 rounded-xl text-xs font-black text-left transition-all flex items-center justify-between cursor-pointer ${
                                   yearFilter === yr
                                     ? "bg-primary text-white shadow-sm shadow-primary/30"
                                     : "text-gray-300 hover:bg-white/10 hover:text-white"
@@ -483,71 +498,77 @@ export default function Dashboard() {
                                 <span>{yr}</span>
                                 {yearFilter === yr && <Check className="w-3.5 h-3.5 text-white" />}
                               </button>
-                            ))}
-                          </div>
+                            ))
+                          ) : (
+                            <div className="px-3 py-3 text-center text-gray-500 text-[11px] font-medium leading-relaxed">
+                              Δεν υπάρχουν ακόμη καταχωρημένες χρονολογίες σε αυτή την κατηγορία.
+                            </div>
+                          )}
                         </div>
-                      </>
-                    )}
-                  </div>
-                )}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="flex items-center justify-between bg-panel/30 px-3 py-1.5 rounded-2xl border border-white/5 relative z-50">
                 <div className="flex items-center gap-2">
                   <span className="text-xs">{userLibraryAccess === "gctunes" ? "🧸" : "🎬"}</span>
                   <span className="text-[11px] font-black text-gray-300">
-                    {userLibraryAccess === "gctunes" ? "GC (Greek Cartoons)" : "GS (Greek Streaming)"}
+                    {userLibraryAccess === "gctunes" ? "GC" : "GS"}
                   </span>
                 </div>
-                {availableYears.length > 0 && (
-                  <div className="relative shrink-0 my-auto">
-                    <button
-                      type="button"
-                      onClick={() => setIsYearPickerOpen(!isYearPickerOpen)}
-                      className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer border shadow-sm whitespace-nowrap shrink-0 ${
-                        yearFilter !== "all"
-                          ? "bg-primary text-white border-primary shadow-primary/30"
-                          : "bg-dark/90 hover:bg-dark text-gray-200 hover:text-white border-gray-800"
-                      }`}
-                      title="Επιλογή Έτους"
-                    >
-                      <Calendar className="w-3.5 h-3.5 shrink-0 text-gray-300" />
-                      <span className="whitespace-nowrap">{yearFilter === "all" ? "Όλα" : yearFilter}</span>
-                      <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isYearPickerOpen ? "rotate-180" : ""}`} />
-                    </button>
+                
+                {/* Year Picker for Single Library */}
+                <div className="relative shrink-0 my-auto">
+                  <button
+                    type="button"
+                    onClick={() => setIsYearPickerOpen(!isYearPickerOpen)}
+                    className={`px-3 py-1 rounded-lg text-[11px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer border shadow-sm whitespace-nowrap shrink-0 ${
+                      yearFilter !== "all"
+                        ? "bg-primary text-white border-primary shadow-primary/30"
+                        : "bg-dark/80 hover:bg-dark text-gray-400 hover:text-white border-white/5"
+                    }`}
+                    title="Επιλογή Χρονολογίας"
+                  >
+                    <Calendar className="w-3.5 h-3.5 shrink-0 text-primary" />
+                    <span className="whitespace-nowrap">{yearFilter === "all" ? "Χρονολογία" : yearFilter}</span>
+                    <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isYearPickerOpen ? "rotate-180" : ""}`} />
+                  </button>
 
-                    {isYearPickerOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-[105]"
-                          onClick={() => setIsYearPickerOpen(false)}
-                        />
-                        <div className="absolute right-0 top-full mt-2 w-52 sm:w-60 bg-[#0f1117] border border-gray-700/80 rounded-2xl shadow-2xl z-[110] p-2.5 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10">
-                          <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-white/10 mb-1.5 text-[11px] font-black text-gray-400">
-                            <span>Χρονολογία</span>
-                            <span className="text-[10px] font-mono text-primary font-bold">
-                              {yearFilter === "all" ? "Όλα" : yearFilter}
-                            </span>
-                          </div>
+                  {isYearPickerOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-[105]"
+                        onClick={() => setIsYearPickerOpen(false)}
+                      />
+                      <div className="absolute right-0 top-full mt-2 w-52 sm:w-60 bg-[#0f1117] border border-gray-700/80 rounded-2xl shadow-2xl z-[110] p-2.5 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10">
+                        <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-white/10 mb-1.5 text-[11px] font-black text-gray-400">
+                          <span>Χρονολογία</span>
+                          <span className="text-[10px] font-mono text-primary font-bold">
+                            {yearFilter === "all" ? "Όλες" : yearFilter}
+                          </span>
+                        </div>
 
-                          <div className="max-h-60 sm:max-h-72 overflow-y-auto space-y-1 pr-1 overscroll-contain scrollbar-thin">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setYearFilter("all");
-                                setIsYearPickerOpen(false);
-                              }}
-                              className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold text-left transition-all flex items-center justify-between cursor-pointer ${
-                                yearFilter === "all"
-                                  ? "bg-primary text-white shadow-sm shadow-primary/30"
-                                  : "text-gray-300 hover:bg-white/10 hover:text-white"
-                              }`}
-                            >
-                              <span>📅 Όλα</span>
-                              {yearFilter === "all" && <Check className="w-3.5 h-3.5 text-white" />}
-                            </button>
+                        <div className="max-h-60 sm:max-h-72 overflow-y-auto space-y-1 pr-1 overscroll-contain scrollbar-thin">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setYearFilter("all");
+                              setIsYearPickerOpen(false);
+                            }}
+                            className={`w-full px-3 py-2 rounded-xl text-xs font-black text-left transition-all flex items-center justify-between cursor-pointer ${
+                              yearFilter === "all"
+                                ? "bg-primary text-white shadow-sm shadow-primary/30"
+                                : "text-gray-300 hover:bg-white/10 hover:text-white"
+                            }`}
+                          >
+                            <span>📅 Όλες οι χρονολογίες</span>
+                            {yearFilter === "all" && <Check className="w-3.5 h-3.5 text-white" />}
+                          </button>
 
-                            {availableYears.map((yr) => (
+                          {availableYears.length > 0 ? (
+                            availableYears.map((yr) => (
                               <button
                                 key={yr}
                                 type="button"
@@ -555,7 +576,7 @@ export default function Dashboard() {
                                   setYearFilter(yr);
                                   setIsYearPickerOpen(false);
                                 }}
-                                className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold text-left transition-all flex items-center justify-between cursor-pointer ${
+                                className={`w-full px-3 py-2 rounded-xl text-xs font-black text-left transition-all flex items-center justify-between cursor-pointer ${
                                   yearFilter === yr
                                     ? "bg-primary text-white shadow-sm shadow-primary/30"
                                     : "text-gray-300 hover:bg-white/10 hover:text-white"
@@ -564,13 +585,17 @@ export default function Dashboard() {
                                 <span>{yr}</span>
                                 {yearFilter === yr && <Check className="w-3.5 h-3.5 text-white" />}
                               </button>
-                            ))}
-                          </div>
+                            ))
+                          ) : (
+                            <div className="px-3 py-3 text-center text-gray-500 text-[11px] font-medium leading-relaxed">
+                              Δεν υπάρχουν ακόμη καταχωρημένες χρονολογίες σε αυτή την κατηγορία.
+                            </div>
+                          )}
                         </div>
-                      </>
-                    )}
-                  </div>
-                )}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             )}
 

@@ -89,7 +89,7 @@ export default function FloatingNavBar({
 
   return (
     <div className="fixed bottom-0 left-1/2 -translate-x-1/2 z-50 w-full max-w-[450px] px-4 pointer-events-auto select-none">
-      <div className="relative w-full h-[64px] mx-auto filter drop-shadow-[0_-4px_24px_rgba(0,0,0,0.6)]">
+      <div className="relative w-full h-[64px] mx-auto">
         
         {/* SVG Morphing Background */}
         <svg
@@ -101,13 +101,13 @@ export default function FloatingNavBar({
             initial={false}
             animate={{ d: generatePath(activeX) }}
             transition={{ type: "spring", stiffness: 350, damping: 28 }}
-            className="fill-[#151921] stroke-gray-800/50 stroke-[1px]" 
+            className="fill-[#12161e] stroke-gray-800/40 stroke-[1px]" 
           />
         </svg>
 
         {/* ANIMATED GLIDING FLOATING BALL */}
         <motion.div
-          className="absolute top-[-28px] w-[52px] h-[52px] rounded-full bg-orange-500 flex items-center justify-center shadow-[0_12px_24px_rgba(249,115,22,0.65)] z-30 pointer-events-none"
+          className="absolute top-[-28px] w-[52px] h-[52px] rounded-full bg-gradient-to-tr from-amber-600 via-orange-500 to-amber-400 flex items-center justify-center shadow-[0_6px_20px_rgba(249,115,22,0.45)] border border-white/20 z-30 pointer-events-none"
           animate={{ left: `${(activeX / 450) * 100}%`, x: "-50%" }}
           transition={{ type: "spring", stiffness: 350, damping: 28 }}
         >
