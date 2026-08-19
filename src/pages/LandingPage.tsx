@@ -79,7 +79,8 @@ export default function LandingPage() {
 
           <div className="flex items-center gap-2 shrink-0">
             <a 
-              href="#download" 
+              href={apkDownloadPath} 
+              download="greek-streaming.apk"
               className="bg-gradient-to-r from-primary via-orange-500 to-amber-600 hover:brightness-110 text-white text-xs font-bold px-4 sm:px-5 py-2 sm:py-2 rounded-full transition-all shadow-lg shadow-primary/20 flex items-center gap-1.5 cursor-pointer active:scale-95"
             >
               <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
