@@ -42,6 +42,17 @@
         "createdAt": 1787062086113,
         "expiresAt": 9999999999999
       }
+    ],
+    [
+      "admings",
+      {
+        "username": "admings",
+        "passwordHash": "g6975767770",
+        "licenseKey": "ADMIN-XMR-9999",
+        "status": "active",
+        "createdAt": 1787146543997,
+        "expiresAt": 9999999999999
+      }
     ]
   ],
   "userDevicesMap": [
@@ -102,5 +113,6 @@
         }
       ]
     }
-  ]
+  ],
+  "movieSuggestions": []
 }

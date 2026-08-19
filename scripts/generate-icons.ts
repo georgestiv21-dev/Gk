@@ -120,18 +120,26 @@ async function generate() {
     .png()
     .toFile(path.join(publicDir, 'apple-touch-icon.png'));
 
-  // 6. Favicon 64x64 & 32x32
+  // 6. Favicon 64x64, 32x32, 16x16, and favicon.ico
   await sharp(svgBuffer)
     .resize(64, 64)
     .png()
     .toFile(path.join(publicDir, 'favicon.png'));
 
-  await sharp(svgBuffer)
+  const fav32 = await sharp(svgBuffer)
     .resize(32, 32)
     .png()
-    .toFile(path.join(publicDir, 'favicon-32x32.png'));
+    .toBuffer();
 
-  console.log('All icons generated successfully!');
+  fs.writeFileSync(path.join(publicDir, 'favicon-32x32.png'), fav32);
+  fs.writeFileSync(path.join(publicDir, 'favicon.ico'), fav32);
+
+  await sharp(svgBuffer)
+    .resize(16, 16)
+    .png()
+    .toFile(path.join(publicDir, 'favicon-16x16.png'));
+
+  console.log('All icons including favicon.ico generated successfully!');
 }
 
 generate().catch(console.error);
