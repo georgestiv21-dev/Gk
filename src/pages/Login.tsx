@@ -194,9 +194,17 @@ export default function Login() {
             </div>
           </div>
 
-          <p className="text-[11px] text-gray-500">
+          <p className="text-[11px] text-gray-500 mb-6">
             Παρακαλούμε ανοίξτε την εφαρμογή αποκλειστικά από την εγκατεστημένη εφαρμογή σας.
           </p>
+          
+          <button
+            onClick={() => navigate('/landing')}
+            className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <ArrowRight className="w-4 h-4" />
+            <span>Επιστροφή στην Αρχική</span>
+          </button>
         </div>
       </div>
     );
@@ -330,7 +338,14 @@ export default function Login() {
             </form>
           </div>
 
-          <div className="mt-6 pt-5 border-t border-gray-800/80 flex flex-col items-center gap-2">
+          <div className="mt-6 pt-5 border-t border-gray-800/80 flex flex-col items-center gap-4 w-full">
+            <button
+              onClick={() => navigate('/landing')}
+              className="w-full max-w-[200px] py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-gray-300 hover:text-white text-[11px] font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <ArrowRight className="w-3.5 h-3.5" />
+              <span>Επιστροφή στην Αρχική</span>
+            </button>
             <p className="text-[11px] text-gray-500 text-center">
               Greek Streaming Platform &bull; Protected & Encrypted
             </p>

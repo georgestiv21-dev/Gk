@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Download, 
   Tv, 
@@ -20,6 +21,21 @@ import Logo from '../components/Logo';
 export default function LandingPage() {
   const [activeTab, setActiveTab] = useState<'tv' | 'phone'>('tv');
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [rotIndex, setRotIndex] = useState<number>(0);
+
+  const rotatingItems = [
+    { text: "Ταινίες", gradient: "from-amber-400 via-orange-400 to-primary" },
+    { text: "Σειρές", gradient: "from-cyan-400 via-sky-400 to-blue-500" },
+    { text: "Blockbusters", gradient: "from-purple-400 via-pink-400 to-rose-400" },
+    { text: "Παιδικές Σειρές", gradient: "from-emerald-400 via-teal-300 to-green-500" },
+  ];
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRotIndex((prev) => (prev + 1) % rotatingItems.length);
+    }, 2200);
+    return () => clearInterval(timer);
+  }, [rotatingItems.length]);
 
   // Direct APK links
   const apkDownloadPath = '/downloads/greek-streaming.apk';
@@ -79,40 +95,78 @@ export default function LandingPage() {
         </div>
       </header>
 
-      {/* Hero Section - Padding top added to offset fixed header */}
-      <section className="relative px-4 sm:px-8 pt-20 sm:pt-24 pb-8 sm:pb-12 min-h-[calc(100vh-62px)] max-w-2xl mx-auto flex flex-col items-center justify-center text-center z-10 w-full my-auto">
+      {/* Hero Section - Optimized for Mobile & Unique Streaming Identity */}
+      <section className="relative px-4 sm:px-8 pt-24 sm:pt-28 pb-12 sm:pb-16 min-h-[calc(100vh-70px)] max-w-3xl mx-auto flex flex-col items-center justify-center text-center z-10 w-full my-auto">
         
-        {/* SEO Tag Badge - Designer Pill */}
-        <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-gradient-to-r from-primary/15 via-amber-500/10 to-primary/5 border border-primary/25 text-primary text-[10px] sm:text-xs font-semibold mb-4 max-w-full backdrop-blur-md shadow-sm">
-          <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-pulse shrink-0 text-amber-400" />
-          <span className="truncate">#1 Ελληνική Πλατφόρμα Streaming • Android & Mobile</span>
+        {/* Glow Accent Spheres behind Hero */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 sm:w-[480px] h-72 sm:h-[480px] bg-gradient-to-br from-primary/25 via-amber-500/15 to-transparent rounded-full blur-[110px] pointer-events-none -z-10 animate-pulse duration-[4000ms]"></div>
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 sm:w-80 h-48 sm:h-80 bg-blue-500/10 rounded-full blur-[90px] pointer-events-none -z-10"></div>
+
+        {/* SEO Tag Badge - Ultra-Refined Glowing Pill */}
+        <div className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-1.5 rounded-full bg-gradient-to-r from-primary/20 via-amber-500/15 to-primary/10 border border-primary/30 text-primary-light text-xs sm:text-sm font-bold mb-5 max-w-full backdrop-blur-xl shadow-lg shadow-primary/10">
+          <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-pulse shrink-0 text-amber-400" />
+          <span className="truncate">#1 Ελληνική Πλατφόρμα Streaming &bull; TV & Mobile</span>
         </div>
 
-        {/* Headline */}
-        <h1 className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tight text-white leading-[1.2] mb-3 max-w-xl px-1">
-          Μεταγλωττισμένα <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-amber-400 to-orange-500">Παιδικά</span> & Ταινίες με <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-amber-500 to-primary-dark">Ελληνικούς Υπότιτλους</span>
+        {/* Headline with Clean Multi-line Rotating Words */}
+        <h1 className="text-3xl sm:text-5xl md:text-6xl font-black tracking-tight text-white leading-[1.2] mb-4 sm:mb-6 max-w-2xl px-1">
+          <span className="block text-gray-400 text-xs sm:text-sm font-bold uppercase tracking-widest text-primary-light/90 mb-2 sm:mb-3">
+            Απολαύστε σε 4K & Full HD
+          </span>
+          <span className="block text-white">
+            Κατέβασε και δες
+          </span>
+          <div className="w-full flex items-center justify-center relative overflow-hidden h-[1.3em] my-1 sm:my-2">
+            <AnimatePresence mode="wait">
+              <motion.span
+                key={rotIndex}
+                initial={{ y: 28, opacity: 0, scale: 0.96 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                exit={{ y: -28, opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className={`font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r ${rotatingItems[rotIndex].gradient} text-3xl sm:text-5xl md:text-6xl whitespace-nowrap`}
+              >
+                {rotatingItems[rotIndex].text}
+              </motion.span>
+            </AnimatePresence>
+          </div>
+          <span className="block text-transparent bg-clip-text bg-gradient-to-r from-white via-gray-100 to-gray-300">
+            με Ελληνικούς Υπότιτλους
+          </span>
         </h1>
 
-        <p className="text-gray-300 text-xs sm:text-sm max-w-md leading-relaxed mb-6 sm:mb-8 px-2 font-normal opacity-90">
-          Η μεγαλύτερη συλλογή από παιδικές σειρές με ελληνική μεταγλώττιση, κινούμενα σχέδια, καθώς και ταινίες με ελληνικούς υπότιτλους σε Full HD & 4K.
+        {/* Subtitle - Crisp, Legible & Optimized for Mobile Screens */}
+        <p className="text-gray-200 text-sm sm:text-base md:text-lg max-w-xl leading-relaxed mb-8 sm:mb-10 px-2 font-medium">
+          Η μεγαλύτερη συλλογή από κλασικές και νέες παιδικές σειρές με αυθεντική ελληνική μεταγλώττιση, καθώς και ξένες ταινίες & σειρές με άρτιους ελληνικούς υπότιτλους σε ποιότητα Full HD & 4K.
         </p>
 
-        {/* Ultra-Minimal, Compact Download Section */}
-        <div id="download" className="w-full max-w-xs sm:max-w-sm flex flex-col items-center gap-3.5 text-center">
+        {/* Ultra-Polished Download Action Area */}
+        <div id="download" className="w-full max-w-sm sm:max-w-md flex flex-col items-center gap-4 text-center">
           
-          {/* Main Compact Download Button */}
+          {/* Main Large Touch-Friendly Download Button */}
           <a
             href={apkDownloadPath}
             download="greek-streaming.apk"
-            className="w-full sm:w-auto px-6 py-2.5 sm:py-3 bg-gradient-to-r from-primary via-amber-600 to-primary-dark hover:brightness-110 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xl shadow-primary/25 flex items-center justify-center gap-2 transition-all transform active:scale-[0.97] cursor-pointer group hover:shadow-primary/40"
+            className="w-full py-3.5 sm:py-4 px-8 bg-gradient-to-r from-primary via-orange-500 to-amber-500 hover:brightness-110 text-white font-black text-sm sm:text-base rounded-2xl shadow-2xl shadow-primary/40 flex items-center justify-center gap-2.5 transition-all transform active:scale-[0.96] cursor-pointer group hover:shadow-primary/60 border border-white/20"
           >
-            <ArrowDownCircle className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0 group-hover:scale-110 transition-transform" />
-            <span>Κατεβάστε Επίσημα το APK</span>
+            <ArrowDownCircle className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 group-hover:scale-110 transition-transform" />
+            <span className="tracking-wide">Κατεβάστε Επίσημα το APK</span>
           </a>
 
-          <div className="flex items-center justify-center gap-1 text-[10px] text-gray-400 opacity-80 pt-0.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>Ασφαλές APK &bull; DRM Protected</span>
+          {/* Trust Badges Row */}
+          <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 text-xs font-semibold text-gray-300 pt-1">
+            <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 px-3 py-1 rounded-full backdrop-blur-sm">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Ασφαλές APK</span>
+            </div>
+            <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 px-3 py-1 rounded-full backdrop-blur-sm">
+              <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>HLS Ultra Speed</span>
+            </div>
+            <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 px-3 py-1 rounded-full backdrop-blur-sm">
+              <Lock className="w-4 h-4 text-blue-400 shrink-0" />
+              <span>DRM Shield</span>
+            </div>
           </div>
 
         </div>
@@ -245,85 +299,72 @@ export default function LandingPage() {
         </div>
 
         {/* Tab Content */}
-        <div className="bg-[#1a1d24] border border-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-8 shadow-xl">
+        <div className="bg-[#12151e]/90 border border-white/10 rounded-2xl sm:rounded-3xl p-5 sm:p-8 shadow-2xl backdrop-blur-xl">
           {activeTab === 'tv' ? (
-            <div className="space-y-5">
-              {/* Badge Method */}
-              <div className="flex items-center justify-between gap-2 pb-3 border-b border-white/10 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-black uppercase">
-                    ⭐ Προτεινόμενος Τρόπος
-                  </span>
-                  <span className="text-xs font-bold text-white">Ασύρματη Μεταφορά από το Κινητό</span>
+            <div className="space-y-4 sm:space-y-6">
+              <div className="flex items-start gap-3 sm:gap-4 p-2 sm:p-3 rounded-xl hover:bg-white/[0.02] transition-colors">
+                <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-emerald-500/30 to-emerald-500/10 text-emerald-400 flex items-center justify-center font-black text-sm sm:text-base shrink-0 border border-emerald-500/40 shadow-sm">1</span>
+                <div>
+                  <h4 className="font-bold text-white text-sm sm:text-base">Κατεβάστε το APK στο Κινητό σας</h4>
+                  <p className="text-xs sm:text-sm text-gray-300 mt-1 leading-relaxed">
+                    Πατήστε το κουμπί <b className="text-white">«Κατεβάστε Επίσημα το APK»</b> πιο πάνω από το κινητό σας τηλέφωνο.
+                  </p>
                 </div>
-                <span className="text-[11px] text-gray-400">Χωρίς πληκτρολόγηση στην τηλεόραση</span>
               </div>
 
-              <div className="space-y-4 sm:space-y-5">
-                <div className="flex items-start gap-3 sm:gap-4">
-                  <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-emerald-500/30">1</span>
-                  <div>
-                    <h4 className="font-bold text-white text-xs sm:text-sm">Κατεβάστε το APK στο Κινητό σας</h4>
-                    <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">
-                      Πατήστε το κουμπί <b>«Κατεβάστε Επίσημα το APK»</b> πιο πάνω από το κινητό σας τηλέφωνο.
-                    </p>
-                  </div>
+              <div className="flex items-start gap-3 sm:gap-4 p-2 sm:p-3 rounded-xl hover:bg-white/[0.02] transition-colors">
+                <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-emerald-500/30 to-emerald-500/10 text-emerald-400 flex items-center justify-center font-black text-sm sm:text-base shrink-0 border border-emerald-500/40 shadow-sm">2</span>
+                <div>
+                  <h4 className="font-bold text-white text-sm sm:text-base">Εγκαταστήστε το «Send Files to TV»</h4>
+                  <p className="text-xs sm:text-sm text-gray-300 mt-1 leading-relaxed">
+                    Κατεβάστε τη δωρεάν εφαρμογή <b className="text-emerald-400">Send Files to TV (SFTV)</b> από το Google Play Store τόσο στο <b className="text-white">κινητό</b> όσο και στην <b className="text-white">Smart TV / Android TV</b> σας.
+                  </p>
                 </div>
+              </div>
 
-                <div className="flex items-start gap-3 sm:gap-4">
-                  <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-emerald-500/30">2</span>
-                  <div>
-                    <h4 className="font-bold text-white text-xs sm:text-sm">Εγκαταστήστε την εφαρμογή «Send Files to TV»</h4>
-                    <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">
-                      Κατεβάστε τη δωρεάν εφαρμογή <b>Send Files to TV (SFTV)</b> από το Google Play Store τόσο στο <b>κινητό</b> όσο και στην <b>Smart TV / Android TV</b> σας.
-                    </p>
-                  </div>
+              <div className="flex items-start gap-3 sm:gap-4 p-2 sm:p-3 rounded-xl hover:bg-white/[0.02] transition-colors">
+                <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-emerald-500/30 to-emerald-500/10 text-emerald-400 flex items-center justify-center font-black text-sm sm:text-base shrink-0 border border-emerald-500/40 shadow-sm">3</span>
+                <div>
+                  <h4 className="font-bold text-white text-sm sm:text-base">Αποστολή (Send) στην Τηλεόραση</h4>
+                  <p className="text-xs sm:text-sm text-gray-300 mt-1 leading-relaxed">
+                    Στην TV επιλέξτε <b className="text-emerald-400">Receive</b>. Στο κινητό επιλέξτε <b className="text-emerald-400">Send</b>, επιλέξτε το αρχείο <code className="bg-black/50 px-1.5 py-0.5 rounded text-emerald-300 font-mono text-xs">greek-streaming.apk</code> (από τον φάκελο Downloads) και πατήστε το όνομα της τηλεόρασής σας.
+                  </p>
                 </div>
+              </div>
 
-                <div className="flex items-start gap-3 sm:gap-4">
-                  <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-emerald-500/30">3</span>
-                  <div>
-                    <h4 className="font-bold text-white text-xs sm:text-sm">Αποστολή (Send) στην Τηλεόραση</h4>
-                    <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">
-                      Στην TV επιλέξτε <b>Receive</b>. Στο κινητό επιλέξτε <b>Send</b>, επιλέξτε το αρχείο <code>greek-streaming.apk</code> (από τον φάκελο Downloads/Λήψεις) και πατήστε το όνομα της τηλεόρασής σας.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3 sm:gap-4">
-                  <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-emerald-500/30">4</span>
-                  <div>
-                    <h4 className="font-bold text-white text-xs sm:text-sm">Εγκατάσταση (Install) & Έναρξη</h4>
-                    <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">
-                      Μόλις ολοκληρωθεί η μεταφορά στην TV (σε 3-5 δευτερόλεπτα), πατήστε πάνω στο αρχείο και επιλέξτε <b>Open / Install</b> για να συνδεθείτε!
-                    </p>
-                  </div>
+              <div className="flex items-start gap-3 sm:gap-4 p-2 sm:p-3 rounded-xl hover:bg-white/[0.02] transition-colors">
+                <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-emerald-500/30 to-emerald-500/10 text-emerald-400 flex items-center justify-center font-black text-sm sm:text-base shrink-0 border border-emerald-500/40 shadow-sm">4</span>
+                <div>
+                  <h4 className="font-bold text-white text-sm sm:text-base">Εγκατάσταση (Install) & Έναρξη</h4>
+                  <p className="text-xs sm:text-sm text-gray-300 mt-1 leading-relaxed">
+                    Μόλις ολοκληρωθεί η μεταφορά στην TV (σε 3-5 δευτερόλεπτα), πατήστε πάνω στο αρχείο και επιλέξτε <b className="text-emerald-400">Open / Install</b> για να συνδεθείτε!
+                  </p>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="space-y-4 sm:space-y-5">
-              <div className="flex items-start gap-3 sm:gap-4">
-                <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-primary/30">1</span>
+            <div className="space-y-4 sm:space-y-6">
+              <div className="flex items-start gap-3 sm:gap-4 p-2 sm:p-3 rounded-xl hover:bg-white/[0.02] transition-colors">
+                <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 text-primary flex items-center justify-center font-black text-sm sm:text-base shrink-0 border border-primary/40 shadow-sm">1</span>
                 <div>
-                  <h4 className="font-bold text-white text-xs sm:text-sm">Κατεβάστε το αρχείο APK</h4>
-                  <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">Πατήστε το κουμπί <b>«Κατεβάστε Επίσημα το APK»</b> παραπάνω από το κινητό σας.</p>
+                  <h4 className="font-bold text-white text-sm sm:text-base">Κατεβάστε το αρχείο APK</h4>
+                  <p className="text-xs sm:text-sm text-gray-300 mt-1 leading-relaxed">Πατήστε το κουμπί <b className="text-white">«Κατεβάστε Επίσημα το APK»</b> παραπάνω από το κινητό σας.</p>
                 </div>
               </div>
 
-              <div className="flex items-start gap-3 sm:gap-4">
-                <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-primary/30">2</span>
+              <div className="flex items-start gap-3 sm:gap-4 p-2 sm:p-3 rounded-xl hover:bg-white/[0.02] transition-colors">
+                <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 text-primary flex items-center justify-center font-black text-sm sm:text-base shrink-0 border border-primary/40 shadow-sm">2</span>
                 <div>
-                  <h4 className="font-bold text-white text-xs sm:text-sm">Αποδοχή Άγνωστων Πηγών</h4>
-                  <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">Αν σας ζητηθεί από το σύστημα Android, επιτρέψτε την «Εγκατάσταση από άγνωστες πηγές».</p>
+                  <h4 className="font-bold text-white text-sm sm:text-base">Αποδοχή Άγνωστων Πηγών</h4>
+                  <p className="text-xs sm:text-sm text-gray-300 mt-1 leading-relaxed">Αν σας ζητηθεί από το Android, επιτρέψτε την «Εγκατάσταση από άγνωστες πηγές».</p>
                 </div>
               </div>
 
-              <div className="flex items-start gap-3 sm:gap-4">
-                <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border border-primary/30">3</span>
+              <div className="flex items-start gap-3 sm:gap-4 p-2 sm:p-3 rounded-xl hover:bg-white/[0.02] transition-colors">
+                <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 text-primary flex items-center justify-center font-black text-sm sm:text-base shrink-0 border border-primary/40 shadow-sm">3</span>
                 <div>
-                  <h4 className="font-bold text-white text-xs sm:text-sm">Έτοιμο!</h4>
-                  <p className="text-[11px] sm:text-xs text-gray-300 mt-0.5">Ανοίξτε το Greek Streaming και απολαύστε το αγαπημένο σας περιεχόμενο.</p>
+                  <h4 className="font-bold text-white text-sm sm:text-base">Έτοιμο!</h4>
+                  <p className="text-xs sm:text-sm text-gray-300 mt-1 leading-relaxed">Ανοίξτε το Greek Streaming και απολαύστε το αγαπημένο σας περιεχόμενο.</p>
                 </div>
               </div>
             </div>
